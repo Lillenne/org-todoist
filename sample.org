@@ -1,0 +1,83 @@
+#+title: Todoist
+
+* Projects
+:PROPERTIES:
+:TODOIST_TYPE: PROJECT_HEADLINE
+:END:
+** Project1
+:PROPERTIES:
+:TODOIST_TYPE: PROJECT
+:id: 1
+:END:
+*** Section 1
+:PROPERTIES:
+:TODOIST_TYPE: SECTION
+:id:       2
+:END:
+**** DONE Task complete :ARCHIVE:
+CLOSED: [2024-09-20 Fri 23:46]
+:PROPERTIES:
+:TODOIST_TYPE: TASK
+:child_order: 2
+:id:       8888
+:END:
+Description
+
+More description
+**** TODO [#A] Task 1
+:PROPERTIES:
+:TODOIST_TYPE: TASK
+:child_order: 1
+:id:       3
+:END:
+Description
+
+More description
+*** Unsectioned
+**** Unsectioned Task 1 [1/2]
+:PROPERTIES:
+:TODOIST_TYPE: TASK
+:id: 4
+:END:
+***** DONE Task 8 :ARCHIVE:
+CLOSED: [2024-09-20 Fri 23:15]
+:PROPERTIES:
+:TODOIST_TYPE: TASK
+:id:       333
+:END:
+***** TODO Task 9
+:PROPERTIES:
+:TODOIST_TYPE: TASK
+:id:       3334
+:END:
+** Project 2
+:PROPERTIES:
+:TODOIST_TYPE: PROJECT
+:id: 11
+:END:
+*** Section 2
+:PROPERTIES:
+:TODOIST_TYPE: SECTION
+:id: 12
+:END:
+**** [#D] Task 2
+:PROPERTIES:
+:TODOIST_TYPE: TASK
+:id: 13
+:END:
+*** Unsectioned
+**** Unsectioned Task 2
+:PROPERTIES:
+:TODOIST_TYPE: TASK
+:id: 14
+:END:
+* Collaborators
+:PROPERTIES:
+:TODOIST_TYPE: USER_HEADLINE
+:END:
+** Austin
+:PROPERTIES:
+:TODOIST_TYPE: USER
+:full_name: Austin Kearns
+:id: 34
+:END:

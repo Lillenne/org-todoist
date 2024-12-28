@@ -1,0 +1,41 @@
+#+title: Readme
+
+* Org Todoist: What is it?
+Org todoist is an emacs package for syncing [[https://orgmode.org/][org mode todos]] with [[https://todoist.com/][Todoist]]
+* Why?
+Org mode is an excellent planning and note-taking tool, but struggles in a few areas:
+
+- Collaboration with non-neckbeards
+- Mobile app features / availability (shoutout to [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly for their great android app]])
+- Sync between devices (I personally use [[https://syncthing.net/][Syncthing]] which works well, but will often have conflicts when adding from the widget)
+
+Todoist fills these gaps and, more importantly, my wife uses it.
+
+There is currently [[https://github.com/abrochard/emacs-todoist][another excellent integration]] for org-mode and todoist, but it takes a fundamentally different approach (stateless on-demand regeneration with the [[https://developer.todoist.com/rest/v2/#overview][REST API]] vs stateful syncing with the [[https://developer.todoist.com/sync/v9/#overview][sync API]] that can be queried by [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly]] on mobile and buffer creation with org.el vs [[https://orgmode.org/worg/dev/org-element-api.html][org-element-api]]).
+* Features and roadmap
+- [X] Generate skeleton todoist buffer on-demand
+  - [X] Projects
+  - [X] Sections
+  - [X] Tasks
+  - [X] Collaborators
+- [-] Add essential task items
+  - [X] TODO status
+  - [X] Tags/labels
+  - [-] Scheduled
+  - [-] Deadline
+  - [-] Completed
+  - [ ] Priority
+  - [ ] Subtask support
+- [ ] Implement sync updates
+  - [ ] Manual sync updates
+  - [ ] Automated sync updates(?)
+- [ ] Add non-essential task items
+  - [ ] Datetime for scheduled / deadline (time of day)
+  - [ ] Effort/Duration
+  - [ ] Time of completion
+  - [ ] Comments
+- [ ] Implement
+- [ ] Implement low priority task items
+  - [ ] Recurring tasks
+* Author's notes
+This is my first major elisp project, so I am almost certainly missing some best practices and useful tools. If you have any knowledge to share or want to contribute, please reach out, create an issue, or open a PR!

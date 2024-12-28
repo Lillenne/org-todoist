@@ -1,0 +1,39 @@
+{
+    "id": "2995104339",
+    "user_id": "2671355",
+    "project_id": "2203306141",
+    "content": "Buy Milk",
+    "description": "",
+    "priority": 1,
+    "due": {
+        "date": "2016-12-06T13:00:00.000000Z",
+        "timezone": "Europe/Madrid",
+        "string": "",
+        "lang": "en",
+        "is_recurring": false
+    },
+    "deadline": {
+        "date": "2016-13-06T13:00:00.000000Z",
+        "timezone": "Europe/Madrid",
+        "string": "",
+        "lang": "en",
+        "is_recurring": false
+    },
+    "parent_id": null,
+    "child_order": 1,
+    "section_id": null,
+    "day_order": -1,
+    "collapsed": false,
+    "labels": ["Food", "Shopping"],
+    "added_by_uid": "2671355",
+    "assigned_by_uid": "2671355",
+    "responsible_uid": null,
+    "checked": false,
+    "is_deleted": false,
+    "sync_id": null,
+    "added_at": "2014-09-26T08:25:05.000000Z",
+    "duration": {
+        "amount": 15,
+        "unit": "minute"
+    }
+}

@@ -1,0 +1,135 @@
+#+title: Org Todoist
+* Notes on org element api
+:PROPERTIES:
+:MYPROP:   test
+:END:
+use :title prop to change text for headline
+
+;; org-element-ast-map
+;; org-element-set-element
+;; org-element-set-parent
+;; org-element-lineage
+;; org-element-contents
+;; org-element-set-contents
+;; org-element-property
+;; org-element-put-property
+;; org-element adopt -> add new child property
+;; org-element-create - create node of type
+;; org-element-context - smallest node around point
+;; org-element-extract - removes node from tree
+;; org-element-lineage-map - map on all ancestors
+;; org-element-with-buffer-copy
+
+;; org-element-put-property element :value "new value"
+;;
+;; section for the initial properties (standard props containing (keyword (with :key :value)))
+;; then headlines (w/ standard props + children)
+;; then section
+;; then all other elements (e.g. paragraph which holds the text content. Multiple paragraphs separated by newline. + src block, whatever else is there)
+
+adopt into property drawer
+#+begin_src emacs-lisp
+    (org-element-map ast 'property-drawer (lambda (elem) (org-element-adopt elem (org-element-create 'node-property '(:key "ADDED" :value "VALUE")))))
+#+end_src
+* Ideas
+** org-element-insert-before for changing description?
+** Subtasks
+- Remove all paragraph nodes from ast (newlines in todoist comment content) or todoist content so that updating paragraphs works correctly
+- Filetags :todoist:
+- Add tags for assigned?
+- Section order
+- Insert hook on todo completion to sent completed to todoist
+- Read changed todo statuses & send complete on sync
+- convert [[https://developer.todoist.com/sync/v8/#due-dates][due dates]] to org time stamps
+  Todoist supports three types of due dates.
+
+Full-day dates (like "1 January 2018" or "tomorrow")
+Floating due dates with time (like "1 January 2018 at 12:00" or "tomorrow at 10am")
+Due dates with time and fixed timezone (like "1 January 2018 at 12:00 America/Chicago" or "tomorrow at 10am Asia/Jakarta")
+Unless specified explicitly, dates with time are created as floating.
+** Sort projects by favorites
+** Add and create new sections/projects/tasks
+* General Buffer structure
+;; AST Map
+;; (Sync areas)
+;; (Project (Project1 ..))
+;; (Project1 (Sections (Tasks)))
+;; ()
+;; Project
+;;
+** Projects
+*** Sections
+**** Task
+- [ ] Subtask
+*** Default
+** Collaborators
+*** Full Name
+props: id, email, full_name, todoist_type
+* [[https://developer.todoist.com/sync/v8/#get-productivity-stats][Todoist API Reference]]
+** Collaborators
+"id": 1855589,
+"email": "you@example.com",
+"full_name": "Example User",
+"timezone": "GMT +3:00",
+"image_id": null
+** Project
+"id": 396936926,
+"legacy_id": 128501470,
+"name": "Project1",
+"color": 30,
+"parent_id": null,
+"child_order": 1,
+"collapsed": 0,
+"shared": false,
+"parent_id": null,
+"legacy_parent_id": null,
+"sync_id": null,
+"is_deleted": 0,
+"is_archived": 0,
+"is_favorite": 0
+** Section
+"id" : 39982,
+"name" : "Section1",
+"project_id" : 301946961,
+"legacy_project_id": 33511505,
+"section_order" : 1,
+"collapsed" : false,
+"user_id" : 1855589,
+"sync_id" : null,
+"is_deleted" : false,
+"is_archived" : false,
+"date_archived" : null,
+"date_added" : "2019-10-07T07:09:27Z"
+** Item
+"id": 301946961,
+"date_added": "2014-09-26T08:25:05Z"
+"is_deleted": 0,
+"in_history": 0,
+"added_by_uid": 1855589,
+"assigned_by_uid": 1855589,
+"user_id": 1855589,
+"sync_id": null,
+
+"legacy_id": 33511505,
+"legacy_project_id": 128501470,
+"legacy_parent_id": null,
+"day_order": -1,
+
+special behavior:
+"section_id": null, -> section headline
+"parent_id": null, -> position & marker (later)
+"labels": [12839231, 18391839], -> tags
+"responsible_uid": null, -> assigned to tag
+"checked": 0, -> done state
+"project_id": 396936926, -> project headline
+"content": "Task1", -> headling -> may be markdown -> pandoc?
+"description": "", -> paragraph
+"priority": 1, -> priority (1 = normal, 4 = urgent)
+"due": null, -> deadline
+"collapsed": 0, -> (eventually hide buffer?)
+"child_order": 1, -> position under parent
+* [[file:api-call-sops.json][API Call]]
+curl https://api.todoist.com/sync/v9/sync \
+    -H "Authorization: Bearer <token>" \
+    -d sync_token='*' \
+    -d resource_types='["all"]'
