@@ -289,29 +289,23 @@ body DESCRIPTION, and drawer PROPERTIES, ignoring SKIP, under PARENT."
         (sch (org-todoist--scheduled-date TASK))
         (dead (org-todoist--deadline-date TASK))
         (closed (org-todoist--closed-date TASK)))
-    (when sch (plist-put props :scheduled sch))
-    (message "s %s" sch) (sleep-for 1)
-    (when dead (plist-put props :deadline dead))
-    (message "d %s" dead) (sleep-for 1)
-    (when closed (plist-put props :closed closed))
-    (message "c %s" closed) (sleep-for 1)
-    (message "%s" (org-element-create 'planning props)) (sleep-for 1)
+    (when sch (setq props (plist-put props :scheduled sch)))
+    (when dead (setq props (plist-put props :deadline dead)))
+    (when closed (setq props (plist-put props :closed closed)))
     (when props (org-element-create 'planning props))))
+
+(defun org-todoist--schedule (HEADLINE TASK)
+  (org-element-insert-before (org-todoist--create-planning TASK) (org-todoist--get-property-drawer HEADLINE)))
+;; (org-element-adopt HEADLINE (org-todoist--create-planning TASK)))
 
 (ert-deftest org-todoist--test--schedule ()
   (let ((task (json-read-file "sample-task.json"))
-        (headline (org-element-create 'headline '(:title "Test Headline" :level 1 :todo-type 'todo :todo-keyword "TODO")))
-        (timestamp (org-timestamp-from-time (org-read-date nil t "2016-12-0T12:00:00.000000" nil ))))
-    (org-todoist--create-planning task))
-  (org-element-adopt headline (org-todoist--create-planning task))
-  headline)
-;; (org-element-set-contents headline (org-element-create 'planning `(:scheduled ,timestamp :deadline ,timestamp))))
-;; (org-todoist--scheduled-date task))
-(org-todoist--deadline-date task))
-;; (org-todoist--closed-date task))
-;;   (org-element-set-contents headline (org-todoist--create-planning task))
-;; (org-todoist-org-element-to-string headline))
-)
+        (headline (org-element-create 'headline '(:title "Test Headline" :level 1 :todo-type 'todo :todo-keyword "TODO"))))
+    ;; (timestamp (org-timestamp-from-time (org-read-date nil t "2016-12-0T12:00:00.000000" nil ))))
+    (org-element-adopt headline (org-todoist--create-planning task))
+    (should (org-todoist--element-equals-str "* TODO Test Headline
+DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
+" headline))))
 
 (defun org-todoist--update-tasks (TASKS AST)
   (cl-loop for data across TASKS do
@@ -341,12 +335,7 @@ body DESCRIPTION, and drawer PROPERTIES, ignoring SKIP, under PARENT."
 
              (dotimes (i (length tags))
                (org-todoist--add-tag task (aref tags i)))
-             ;; (parse-time-string "2016-12-0T12:00:00.000000")
-             ;; (org-timestamp-from-time (org-read-date nil t "2016-12-0T12:00:00.000000" nil ))
-             (org-timestamp-from-time (org-read-date nil t (org-todoist--scheduled-date) nil))
-             (org-element-put-property task :scheduled (org-timestamp-from-time ))
-             ;; org-timestamp-from-string/time org-timestamp
-
+             (org-todoist--schedule task data)
              (org-todoist--set-todo task (equal :json-true (assoc-default 'checked data))))))
 
 

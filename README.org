@@ -21,7 +21,7 @@ There is currently [[https://github.com/abrochard/emacs-todoist][another excelle
 - [-] Add essential task items
   - [X] TODO status
   - [X] Tags/labels
-  - [-] Scheduled
+  - [X] Scheduled
   - [-] Deadline
   - [-] Completed
   - [ ] Priority
