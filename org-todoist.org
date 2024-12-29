@@ -1,8 +1,9 @@
 #+title: Org Todoist
-* Notes on org element api
+* Notes
 :PROPERTIES:
 :MYPROP:   test
 :END:
+** org element api
 use :title prop to change text for headline
 
 ;; org-element-ast-map
@@ -30,6 +31,11 @@ use :title prop to change text for headline
 adopt into property drawer
 #+begin_src emacs-lisp
     (org-element-map ast 'property-drawer (lambda (elem) (org-element-adopt elem (org-element-create 'node-property '(:key "ADDED" :value "VALUE")))))
+#+end_src
+** Org
+#+STARTUP: hidedrawers
+#+begin_src emacs-lisp
+(org-fold-hide-drawer-all)
 #+end_src
 * Ideas
 ** org-element-insert-before for changing description?

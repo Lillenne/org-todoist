@@ -22,19 +22,18 @@ There is currently [[https://github.com/abrochard/emacs-todoist][another excelle
   - [X] TODO status
   - [X] Tags/labels
   - [X] Scheduled
-  - [-] Deadline
-  - [-] Completed
+  - [X] Deadline
+  - [ ] Completed
   - [ ] Priority
   - [ ] Subtask support
-- [ ] Implement sync updates
-  - [ ] Manual sync updates
+- [-] Implement sync updates
+  - [X] Manual sync updates
   - [ ] Automated sync updates(?)
 - [ ] Add non-essential task items
   - [ ] Datetime for scheduled / deadline (time of day)
   - [ ] Effort/Duration
   - [ ] Time of completion
   - [ ] Comments
-- [ ] Implement
 - [ ] Implement low priority task items
   - [ ] Recurring tasks
 * Author's notes

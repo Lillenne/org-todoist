@@ -33,9 +33,10 @@
 (defvar org-todoist-file "todoist.org")
 (defvar org-todoist-user-headline "Collaborators")
 (defvar org-todoist-project-headline "Projects")
+(defvar org-todoist-show-n-levels 3
+  "The number of headline levels to show. 2=projects, 3=sections, 4=root tasks, -1 no fold")
 (defvar org-todoist-todo-keyword "TODO")
 (defvar org-todoist-done-keyword "DONE")
-;; (defvar org-todoist-use-scheduled nil "Use SCHEDULED instead of DEADLINE for todoist dates")
 (defun org-todoist--expand-from-dir (dir file)
   (if (file-name-absolute-p file)
       file
@@ -43,8 +44,8 @@
 (defun org-todoist-file () (org-todoist--expand-from-dir org-directory org-todoist-file))
 
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defconst org-todoist-resource-types '(projects items sections collaborators) "The list of resource types to sync")
-(defconst org-todoist-sync-endpoint "https://api.todoist.com/sync/v8/sync")
+(defconst org-todoist-resource-types '("projects" "labels" "items" "sections" "collaborators") "The list of resource types to sync")
+(defconst org-todoist-sync-endpoint "https://api.todoist.com/sync/v9/sync")
 (defconst org-todoist-request-type "application/x-www-form-urlencoded")
 (defconst org-todoist-http-method "POST")
 (defconst org-todoist--type "TODOIST_TYPE")
@@ -55,9 +56,11 @@
 (defconst org-todoist--user-node-type "USER_HEADLINE")
 (defconst org-todoist--project-node-type "PROJECT_HEADLINE")
 (defconst org-todoist--sync-areas ["collaborators", "projects", "items", "sections"])
-(defconst org-todoist--project-skip-list `("can_assign_tasks" 'name ,(intern "name"))) ;; the intern cmd fixes double prop adding. both are required tbd why
+(defconst org-todoist--project-skip-list `('name ,(intern "name"))) ;; the intern cmd fixes double prop adding. both are required tbd why
 (defconst org-todoist--section-skip-list `('name ,(intern "name"))) ;; the intern cmd fixes double prop adding. both are required tbd why
-(defconst org-todoist--task-skip-list `('name ,(intern "name"))) ;; the intern cmd fixes double prop adding. both are required tbd why
+(defconst org-todoist--task-skip-list `('name ,(intern "name") 'description ,(intern "description"))) ;; the intern cmd fixes double prop adding. both are required tbd why
+(defconst org-todoist--sync-token-file "SYNC-TOKEN")
+(defconst org-todoist--sync-buffer-file "SYNC-BUFFER")
 
 
                                         ;Data;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -66,33 +69,79 @@
 (defvar org-todoist--sync-err nil "The error from the last sync, if any")
 (defvar org-todoist-sync-interval (* 60 10) "The interval between syncing with Todoist servers.")
 (defun org-todoist--storage-file (FILE) (concat (file-name-as-directory org-todoist--storage-dir) FILE))
-(defun org-todoist--set-sync-token (TOKEN) (with-file! (org-todoist--storage-file "SYNC-TOKEN") (erase-buffer) (insert TOKEN)))
-(defun org-todoist--get-sync-token () (with-file-contents! (org-todoist--storage-file "SYNC-TOKEN") (buffer-string)))
-(defun org-todoist--set-last-sync-buffer (AST) (with-file! (org-todoist--storage-file "SYNC-BUFFER") (org-todoist-org-element-to-string AST)))
-(defun org-todoist--get-last-sync-buffer-ast () (with-file-contents! (org-todoist--storage-file "SYNC-BUFFER") (org-mode) (org-element-parse-buffer)))
+(defun org-todoist--set-sync-token (TOKEN) (with-file! (org-todoist--storage-file org-todoist--sync-token-file) (erase-buffer) (insert TOKEN)))
+(defun org-todoist--get-sync-token ()
+  (if (file-exists-p (org-todoist--storage-file org-todoist--sync-token-file))
+      (let ((res (with-file-contents! (org-todoist--storage-file org-todoist--sync-token-file) (get-last-line))))
+        (if res res "*"))
+    "*"))
+
+(defun org-todoist--set-last-sync-buffer (AST) (with-file! (org-todoist--storage-file org-todoist--sync-buffer-file) (insert (org-todoist-org-element-to-string AST))))
+(defun org-todoist--get-last-sync-buffer-ast () (with-file-contents! (org-todoist--storage-file org-todoist--sync-buffer-file) (org-mode) (org-element-parse-buffer)))
+
+(defun get-last-line ()
+  (save-excursion
+    (goto-char (point-max))
+    (thing-at-point 'line t)))
 
                                         ;API Requests;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun org-todoist--parse-response (RESPONSE)
+(defun org-todoist-sync ()
+  (interactive)
+  (org-todoist--do-sync (org-todoist--get-sync-token)))
+
+(defun org-todoist-reset ()
+  (interactive)
+  (delete-file (org-todoist-file))
+  (delete-file (org-todoist--storage-file org-todoist--sync-token-file))
+  (delete-file (org-todoist--storage-file org-todoist--sync-buffer-file))
+  (org-todoist--do-sync "*"))
+
+(defun org-todoist--do-sync (TOKEN)
+  (when (or (null org-todoist-api-token) (not (stringp org-todoist-api-token)))
+    (error "No org-todoist-api-token API token set"))
+  (setq org-todoist--sync-err nil)
+  (let* ((url-request-method org-todoist-http-method)
+         (url-request-extra-headers `(("Authorization" . ,(concat "Bearer " org-todoist-api-token))
+                                      ("Content-Type" . ,org-todoist-request-type)))
+         (request-data `(("sync_token" . ,TOKEN) ("resource_types" . ,(json-encode org-todoist-resource-types))))
+         (url-request-data (mm-url-encode-www-form-urlencoded request-data)))
+    (url-retrieve org-todoist-sync-endpoint
+                  (lambda (events)
+                    (if (plist-member events :error)
+                        (setq org-todoist--sync-err events)
+                      (let ((resp (with-current-buffer (current-buffer)
+                                    (goto-char url-http-end-of-headers)
+                                    (decode-coding-region (point) (point-max) 'utf-8 t))))
+                        (org-todoist--parse-response (json-read-from-string resp) (org-todoist--file-ast))))
+                    (find-file (org-todoist-file))
+                    (save-buffer)
+                    (org-fold-hide-drawer-all)
+                    (if (< org-todoist-show-n-levels 1)
+                        (org-content)
+                      (org-content org-todoist-show-n-levels)))
+                  nil
+                  'silent
+                  'inhibit-cookies)))
+
+(defun org-todoist--parse-response (RESPONSE AST)
   (let ((tasks (assoc-default 'items RESPONSE))
         (projects (assoc-default 'projects RESPONSE))
         (collab (assoc-default 'collaborators RESPONSE))
         (sections (assoc-default 'sections RESPONSE))
-        (token (assoc-default 'sync_token RESPONSE))
-        (ast (org-todoist--file-ast)))
-    (org-todoist--update-users collab ast)
-    (org-todoist--update-projects projects ast)
-    (org-todoist--update-sections sections ast)
-    (org-todoist--update-tasks tasks ast)
+        (token (assoc-default 'sync_token RESPONSE)))
+    (org-todoist--update-users collab AST)
+    (org-todoist--update-projects projects AST)
+    (org-todoist--update-sections sections AST)
+    (org-todoist--update-tasks tasks AST)
     (org-todoist--set-sync-token token)
-    (org-todoist--set-last-sync-buffer ast)
-    (org-todoist--update-file ast)
-    ))
+    (org-todoist--set-last-sync-buffer AST)
+    (org-todoist--update-file AST)))
 
 (ert-deftest org-todoist--test--parse-response ()
   (with-file-contents! "/home/aus/projects/org-todoist/api-call.json"
     (let ((resp (json-read)))
       ;; TODO actually test
-      (org-todoist--parse-response resp)))
+      (org-todoist--parse-response resp (org-todoist--file-ast))))
   )
 
 (defun org-todoist--insert-header ()
@@ -120,8 +169,7 @@
               org-todoist--project-skip-list))
     (org-todoist--sort-by-child-order projects "child_order")
     (dolist (proj (org-todoist--project-nodes AST))
-      (when (length= (org-todoist--get-sections proj) 0) (org-todoist--create-node org-todoist--section-type "Default" nil nil proj)))
-    ))
+      (when (length= (org-todoist--get-sections proj) 0) (org-todoist--create-node org-todoist--section-type "Default" nil nil proj)))))
 
 (defun org-todoist--get-sections (PROJECT)
   (org-element-map PROJECT 'headline (lambda (hl) (when (equal (org-todoist--get-todoist-type hl) org-todoist--section-type) hl))))
@@ -200,18 +248,8 @@
     node))
 
 (defun org-todoist--add-description (NODE DESCRIPTION)
-  ;; (org-element-adopt NODE (org-element-create 'paragraph nil DESCRIPTION))) ;; plain-text type also works?
   (org-element-adopt NODE (org-element-create 'plain-text nil DESCRIPTION))) ;; plain-text type also works?
 
-;; (defun org-todoist--get-or-create-node-add-prop (PARENT TYPE ID TEXT DESCRIPTION PROPERTIES &optional SKIP)
-;;   (if-let ((found (org-todoist--get-by-id TYPE ID PARENT)))
-;;       (org-todoist--add-all-properties found PROPERTIES SKIP) ;; TODO update text and description
-;;     (org-todoist--create-node TYPE TEXT DESCRIPTION PROPERTIES PARENT SKIP)))
-
-;; (defun org-todoist--get-or-create-node (PARENT TYPE ID TEXT DESCRIPTION PROPERTIES &optional SKIP)
-;;   (let ((node (org-todoist--get-or-create-node-add-prop PARENT TYPE ID TEXT DESCRIPTION PROPERTIES SKIP)))
-;;     ()
-;;     ))
 (defun org-todoist--replace-description (NODE DESCRIPTION)
   "Replaces the description of NODE with DESCRIPTION."
   (if DESCRIPTION
@@ -339,34 +377,34 @@ DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
              (org-todoist--set-todo task (equal :json-true (assoc-default 'checked data))))))
 
 
-;; TODO don't do this all together, do it per node type for applicable. Some (archive, deleted) need to be here.
-(defun org-todoist--add-prop-special (NODE PROPERTIES)
-  (org-element-put-property updated :title TEXT)
-  (org-todoist--replace-description updated DESCRIPTION)
-  (let (
-        (full_name (assoc-default 'full_name PROPERTIES)) ;; collaborator name
-        (name (assoc-default 'name PROPERTIES)) ;; project or section name
-        (is_deleted (assoc-default 'is_deleted PROPERTIES)) ;; project, section, or task removal
-        (is_archived (assoc-default 'is_archived PROPERTIES)) ;; archive tag
-        (section_id (assoc-default 'section_id PROPERTIES)) ;; task position ;; TODO
-        (parent_id (assoc-default 'parent_id PROPERTIES)) ;; for subtask position ;; TODO
-        (labels (assoc-default 'labels PROPERTIES)) ;; tags -- do in task fn ;; TODO
-        (responsible_uid (assoc-default 'responsible_uid PROPERTIES)) ;; assignee tag, --assign -- do in task fn
-        (checked (assoc-default 'checked PROPERTIES)) ;; set-todo -- do in task fn
-        (content (assoc-default 'content PROPERTIES)) ;; NOT HERE
-        (description (assoc-default 'description PROPERTIES)) ;; NOT HERE
-        (priority (assoc-default 'priority PROPERTIES)) ;; set-priority - do in task fn
-        (due (assoc-default 'due PROPERTIES)) ;; for tasks TODO !
-        (child_order (assoc-default 'child_order PROPERTIES)) ;; for projects and tasks - sorting elsewhere
-        (section_order (assoc-default 'section_order PROPERTIES))) ;; for sections, sorting elsewhere
-    ;; TODO implement
-    (org-todoist--unimplemented)
-    )
-  ;; labels, responsible_uid, checked, content (title), description, priority (1 & 4 swapped), due, child_order
-  ;; :closed, :archived, :priority, :deadline
+;; ;; TODO don't do this all together, do it per node type for applicable. Some (archive, deleted) need to be here.
+;; (defun org-todoist--add-prop-special (NODE PROPERTIES)
+;;   (org-element-put-property updated :title TEXT)
+;;   (org-todoist--replace-description updated DESCRIPTION)
+;;   (let (
+;;         (full_name (assoc-default 'full_name PROPERTIES)) ;; collaborator name
+;;         (name (assoc-default 'name PROPERTIES)) ;; project or section name
+;;         (is_deleted (assoc-default 'is_deleted PROPERTIES)) ;; project, section, or task removal
+;;         (is_archived (assoc-default 'is_archived PROPERTIES)) ;; archive tag
+;;         (section_id (assoc-default 'section_id PROPERTIES)) ;; task position ;; TODO
+;;         (parent_id (assoc-default 'parent_id PROPERTIES)) ;; for subtask position ;; TODO
+;;         (labels (assoc-default 'labels PROPERTIES)) ;; tags -- do in task fn ;; TODO
+;;         (responsible_uid (assoc-default 'responsible_uid PROPERTIES)) ;; assignee tag, --assign -- do in task fn
+;;         (checked (assoc-default 'checked PROPERTIES)) ;; set-todo -- do in task fn
+;;         (content (assoc-default 'content PROPERTIES)) ;; NOT HERE
+;;         (description (assoc-default 'description PROPERTIES)) ;; NOT HERE
+;;         (priority (assoc-default 'priority PROPERTIES)) ;; set-priority - do in task fn
+;;         (due (assoc-default 'due PROPERTIES)) ;; for tasks TODO !
+;;         (child_order (assoc-default 'child_order PROPERTIES)) ;; for projects and tasks - sorting elsewhere
+;;         (section_order (assoc-default 'section_order PROPERTIES))) ;; for sections, sorting elsewhere
+;;     ;; TODO implement
+;;     (org-todoist--unimplemented)
+;;     )
+;;   ;; labels, responsible_uid, checked, content (title), description, priority (1 & 4 swapped), due, child_order
+;;   ;; :closed, :archived, :priority, :deadline
 
-  ;; Full name - needed for user nodes
-  )
+;;   ;; Full name - needed for user nodes
+;;   )
 
 (defun org-todoist--list-headlines ()
   (let ((headlines '()))
@@ -544,39 +582,12 @@ DEFAULT text."
       (when created (create-file-buffer (org-todoist-file)))
       (find-file (org-todoist-file))
       (when created (org-todoist--insert-header))
-      (org-element-parse-buffer)))
-  )
+      (org-element-parse-buffer))))
 
 (ert-deftest org-todoist--test-update-file ()
   "Tests insertion of org syntax from abstract syntax tree into org-todoist-file"
   (org-todoist--update-file (org-todoist--generate-ast test-org-str))
   (with-file-contents! (org-todoist-file) (should (equal (org-todoist--remove-ws test-org-str) (org-todoist--remove-ws (buffer-string))))))
-
-;; (defun org-todoist--sync-request-initial ()
-
-;;   (let* ((url-request-method "POST")
-;;          (url-request-extra-headers '(("Authorization" . (concat "Bearer " org-todoist-api-token))
-;;                                       ("Content-Type" . "application/x-www-form-urlencoded")))
-
-;;          (request-data ()) ;;TODO sync_token=* and resource_types=[projects, labels, items, sections, collaborators]
-;;          (url-request-data (encode-coding-string (json-encode request-data) 'utf-8)))
-
-;;     )
-;;   (url-retrieve org-todoist-sync-endpoint
-;;                 (lambda (status) (setq org-todoist--sync-error status)
-;;                   (unless status ()
-;;                           ;; TODO check no body?
-;;                           (goto-char url-http-end-of-headers)
-;;                           (let ((response (json-read-from-string (decode-coding-region (point) (point-max) 'utf-8 t)))
-;;                                 (ast (with-file-contents! (org-todoist-file) (org-element-parse-buffer))))
-;;                             (org-todoist--update-projects response ast)
-;;                             (org-todoist--update-sections response ast)
-;;                             (org-todoist--update-tasks response ast)
-;;                             (org-todoist--update-users response ast)
-;;                             (org-todoist--update-file ast))))
-;;                 nil
-;;                 'silent
-;;                 'inhibit-cookies))
 
                                         ;Find node;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--find-node (QUERY AST)
@@ -614,10 +625,6 @@ matching parent."
     (should (equal (org-todoist--get-prop project "ID") "1"))))
 
 (defun org-todoist--unimplemented () (error "Unimplemented feature!"))
-(defun org-todoist--request-sync () (org-todoist--unimplemented))
-;; pass sync_token=* for initial request
-;; response will have full_sync parameter
-
 
                                         ;Property get/set;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--insert-identifier (NODE IDENTIFIER)
@@ -1025,42 +1032,3 @@ paragraph
                        (is_archived . :json-false)
                        (archived_at)
                        (added_at . "2019-10-07T07:09:27.000000Z")))
-
-
-;; (defun org-todoist--section-change-project (AST OLD_SECTION_ID SECTION)
-;;   "Changes the project that a section is associated with. If the section
-;; is deleted, all children are moved to the \"Unsectioned\" heading under
-;; the same project."
-;;   (org-todoist--unimplemented))
-
-;; (defun org-todoist--section-changed (SECTION)
-;;   "Gets if the section was moved to another project")
-
-;; (defun org-todoist--task-change-section (AST TASK)
-;;   "Changes the section that a task is associated with."
-;;   (if (org-todoist--get-prop ))
-;;   (org-todoist--get-by-id ))
-
-
-;; (defun org-todoist--update-project-headline (AST NODE PROPERTIES)
-;;   ;; TODO
-;;   (if NODE
-;;       ()
-;;     (org-todoist--add-all-properties)
-;;     ))
-;; (defun org-todoist--update-section-headline (AST NODE PROPERTIES)
-;;   ;; TODO)
-;;   )
-;; (defun org-todoist--update-task-headline (AST NODE PROPERTIES)
-;;   ;; TODO)
-;;   )
-;;
-
-;; ;; TODO merging
-;; (defun org-todoist--merge-org-headline (PREVIOUS ELEMENT-TYPE TODOIST-TYPE PROPERTIES)
-;;   "Creates a headline node with properties PROPERTIES"
-;;   (if PREVIOUS
-;;       ();; merge
-;;     ())) ;; create))
-
-;; (ert-deftest org-todoist--test--create-org-headline ())
