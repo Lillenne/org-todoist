@@ -351,12 +351,7 @@ DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
                  (task nil)
                  (section (org-todoist--get-by-id org-todoist--section-type (assoc-default 'section_id data) AST))
                  (tags (assoc-default 'labels data))
-                 (effort (assoc-default 'duration data)) ;; TODO
-                 (sch (assoc-default 'due data)) ;; TODO create timestamp
-                 (completedat (assoc-default 'completed_at data)) ;; TODO
-                 (priority (assoc-default 'priority data)) ;; TODO
                  (assignee (assoc-default 'responsible_uid data)) ;; TODO
-                 (dead (assoc-default 'deadline data)) ;; TODO create timestamp
                  )
              ;; check if we need to move sections
              (unless (cl-equalp (org-todoist--get-section-id-position task) (assoc-default 'section_id data))
@@ -374,7 +369,9 @@ DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
              (dotimes (i (length tags))
                (org-todoist--add-tag task (aref tags i)))
              (org-todoist--schedule task data)
-             (org-todoist--set-todo task (equal :json-true (assoc-default 'checked data))))))
+             (org-todoist--set-effort task data)
+             (org-todoist--set-priority task (assoc-default 'priority data))
+             (org-todoist--set-todo task (assoc-default 'checked data)))))
 
 
 ;; ;; TODO don't do this all together, do it per node type for applicable. Some (archive, deleted) need to be here.
@@ -458,6 +455,24 @@ DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
         (should (> (org-todoist--get-position next PROPERTY) prev))
         (setq prev (org-todoist--get-position next PROPERTY))))))
 
+(defun org-todoist--set-effort (NODE TASK)
+  (when-let* ((duration (assoc-default 'duration TASK))
+              (amount (assoc-default 'amount duration))
+              (unit (assoc-default 'unit duration))
+              (effortval (cond
+                          ((string-equal unit "minute") amount)
+                          ((string-equal unit "day") (* 1440 amount))
+                          (t nil))))
+    (org-todoist--add-prop NODE "EFFORT" (org-duration-from-minutes effortval))))
+
+(ert-deftest org-todoist--test--set-effort ()
+  (let ((hl (org-element-create 'headline '(:title "Headline" :level 1))))
+    (org-todoist--set-effort hl test-task)
+    (should (org-todoist--element-equals-str "* Headline
+:PROPERTIES:
+:EFFORT:   0:15
+:END:
+" hl))))
 
 (defun org-todoist--set-priority (NODE PRIORITY)
   (org-element-put-property NODE :priority (cond
@@ -467,18 +482,19 @@ DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
                                             ((equal PRIORITY 1) ?D))))
 
 (defun org-todoist--set-todo (NODE CHECKED)
-  (if (not CHECKED)
-      (progn (org-element-put-property NODE :todo-keyword org-todoist-todo-keyword)
-             (org-element-put-property NODE :todo-type 'todo))
-    (org-element-put-property NODE :todo-keyword org-todoist-done-keyword)
-    (org-element-put-property NODE :todo-type 'done)))
+  (if (eql t CHECKED) ;; :json-false for false currently, t for true
+      (progn
+        (org-element-put-property NODE :todo-keyword org-todoist-done-keyword)
+        (org-element-put-property NODE :todo-type 'done))
+    (org-element-put-property NODE :todo-keyword org-todoist-todo-keyword)
+    (org-element-put-property NODE :todo-type 'todo)))
 
 
 (ert-deftest org-todoist--test--set-todo ()
   (let ((task (org-todoist--test-task)))
     (org-todoist--set-todo task t)
     (should (cl-search "DONE" (org-todoist-org-element-to-string task)))
-    (org-todoist--set-todo task :json-false)
+    (org-todoist--set-todo task nil)
     (should (cl-search "TODO" (org-todoist-org-element-to-string task)))))
 
 (defun org-todoist--root (NODE)
