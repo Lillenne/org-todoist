@@ -86,18 +86,19 @@
     (thing-at-point 'line t)))
 
                                         ;API Requests;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun org-todoist-sync ()
-  (interactive)
-  (org-todoist--do-sync (org-todoist--get-sync-token)))
+(defun org-todoist-sync (&optional ARG)
+  (interactive "P")
+  (org-todoist--do-sync (org-todoist--get-sync-token) ARG))
 
-(defun org-todoist-reset ()
-  (interactive)
+(defun org-todoist-reset (&optional ARG)
+  (interactive "P")
+  (kill-buffer org-todoist-file)
   (delete-file (org-todoist-file))
   (delete-file (org-todoist--storage-file org-todoist--sync-token-file))
   (delete-file (org-todoist--storage-file org-todoist--sync-buffer-file))
-  (org-todoist--do-sync "*"))
+  (org-todoist--do-sync "*" ARG))
 
-(defun org-todoist--do-sync (TOKEN)
+(defun org-todoist--do-sync (TOKEN OPEN)
   (when (or (null org-todoist-api-token) (not (stringp org-todoist-api-token)))
     (error "No org-todoist-api-token API token set"))
   (setq org-todoist--sync-err nil)
@@ -106,21 +107,24 @@
                                       ("Content-Type" . ,org-todoist-request-type)))
          (request-data `(("sync_token" . ,TOKEN) ("resource_types" . ,(json-encode org-todoist-resource-types))))
          (url-request-data (mm-url-encode-www-form-urlencoded request-data)))
+    (message (if OPEN "Syncing with todoist. Buffer will open when sync is complete..." "Syncing with todoist. This may take a moment..."))
     (url-retrieve org-todoist-sync-endpoint
-                  (lambda (events)
+                  (lambda (events open)
                     (if (plist-member events :error)
                         (setq org-todoist--sync-err events)
                       (let ((resp (with-current-buffer (current-buffer)
                                     (goto-char url-http-end-of-headers)
                                     (decode-coding-region (point) (point-max) 'utf-8 t))))
-                        (org-todoist--parse-response (json-read-from-string resp) (org-todoist--file-ast))))
-                    (find-file (org-todoist-file))
-                    (save-buffer)
-                    (org-fold-hide-drawer-all)
-                    (if (< org-todoist-show-n-levels 1)
-                        (org-content)
-                      (org-content org-todoist-show-n-levels)))
-                  nil
+                        (org-todoist--set-last-response resp)
+                        (org-todoist--parse-response (json-read-from-string resp) (org-todoist--file-ast)))
+                      (when open
+                        (find-file (org-todoist-file))
+                        (save-buffer)
+                        (org-fold-hide-drawer-all)
+                        (if (< org-todoist-show-n-levels 1)
+                            (org-content)
+                          (org-content org-todoist-show-n-levels)))))
+                  `(,OPEN)
                   'silent
                   'inhibit-cookies)))
 
@@ -310,7 +314,7 @@ body DESCRIPTION, and drawer PROPERTIES, ignoring SKIP, under PARENT."
 
 (defun org-todoist--closed-date (TASK)
   (let ((date (assoc-default 'completed_at TASK)))
-    (when (org-todoist--has-date date) (org-timestamp-from-time (org-read-date nil t date nil)))))
+    (org-todoist--get-timestamp2 date)))
 
 (defun org-todoist--scheduled-date (TASK) (org-todoist--get-timestamp 'due TASK))
 
@@ -318,7 +322,10 @@ body DESCRIPTION, and drawer PROPERTIES, ignoring SKIP, under PARENT."
 
 (defun org-todoist--get-timestamp (SYMBOL TASK)
   (let ((date (assoc-default 'date (assoc-default SYMBOL TASK))))
-    (when (org-todoist--has-date date) (org-timestamp-from-time (org-read-date nil t date nil)))))
+    (org-todoist--get-timestamp2 date)))
+
+(defun org-todoist--get-timestamp2 (date)
+  (when (org-todoist--has-date date) (org-timestamp-from-time (org-read-date nil t date nil) (not (eql 10 (length date)))))) ;; Todoist date format for tasks without a time is 10 char string
 
 (defun org-todoist--has-date (DATE)
   (not (or (null DATE) (string-equal "" DATE) (string-equal "null" DATE))))
@@ -334,8 +341,10 @@ body DESCRIPTION, and drawer PROPERTIES, ignoring SKIP, under PARENT."
     (when props (org-element-create 'planning props))))
 
 (defun org-todoist--schedule (HEADLINE TASK)
-  (org-element-insert-before (org-todoist--create-planning TASK) (org-todoist--get-property-drawer HEADLINE)))
-;; (org-element-adopt HEADLINE (org-todoist--create-planning TASK)))
+  (if-let ((existing (org-element-map HEADLINE 'planning (lambda (plan) plan ;; (when (eq (org-element-parent plan) HEADLINE) plan)
+                                                           ) nil t)))
+      (org-element-set existing (org-todoist--create-planning TASK))
+    (org-element-insert-before (org-todoist--create-planning TASK) (org-todoist--get-property-drawer HEADLINE))))
 
 (ert-deftest org-todoist--test--schedule ()
   (let ((task (json-read-file "sample-task.json"))
@@ -598,7 +607,7 @@ DEFAULT text."
     (let ((created (not (file-exists-p (org-todoist-file)))))
       (when created (create-file-buffer (org-todoist-file)))
       (find-file (org-todoist-file))
-      (when created (org-todoist--insert-header))
+      (when created (erase-buffer) (org-todoist--insert-header))
       (org-element-parse-buffer))))
 
 (ert-deftest org-todoist--test-update-file ()
