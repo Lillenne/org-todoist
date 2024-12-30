@@ -712,7 +712,7 @@ Replaces the current value with VALUE if property KEY already exists."
              (org-todoist--put-node-attribute headline KEY VALUE) ;; update property plist
              (unless drawer ;; create drawer if needed
                (setq drawer (org-element-create 'property-drawer))
-               (org-element-adopt drawer))
+               (org-element-adopt DRAWER drawer))
              (org-todoist--set-prop-in-place drawer KEY VALUE)
              drawer))
           (t (signal 'todoist--error "Called org-todoist--add-prop with invalid type")))))
