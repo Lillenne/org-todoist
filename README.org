@@ -29,10 +29,22 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [X] Completed
   - [X] Priority
   - [ ] Assignee
+  - [ ] Skip properties to reduce drawer size
 - [-] Implement sync updates
   - [X] Manual sync read updates
   - [ ] Automated sync read updates(?)
-  - [ ] Push updates
+  - [-] Push updates
+    - [X] TODO state
+    - [ ] Title
+    - [ ] Description
+    - [ ] Comments
+    - [ ] Section and project changes
+    - [ ] New sections
+    - [ ] New projects
+    - [ ] Deletions
+      - [ ] Sections
+      - [ ] Projects
+      - [ ] Tasks
 - [-] Add non-essential task items
   - [X] Datetime for scheduled / deadline (time of day)
   - [X] Effort/Duration

@@ -22,6 +22,7 @@
 (require 'url)
 (require 'org)
 (require 'json)
+(require 'dash)
 
                                         ;Config;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TODO likely don't want to override user configuration. Todoist has 4 priorities.
@@ -44,9 +45,9 @@
 (defun org-todoist-file () (org-todoist--expand-from-dir org-directory org-todoist-file))
 
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defconst org-todoist-resource-types '("projects" "labels" "items" "sections" "collaborators") "The list of resource types to sync")
+(defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators") "The list of resource types to sync")
 (defconst org-todoist-sync-endpoint "https://api.todoist.com/sync/v9/sync")
-(defconst org-todoist-request-type "application/x-www-form-urlencoded")
+(defconst org-todoist-request-type "application/x-www-form-urlencoded; charset=utf-8")
 (defconst org-todoist-http-method "POST")
 (defconst org-todoist--type "TODOIST_TYPE")
 (defconst org-todoist--collaborator-type "USER")
@@ -70,7 +71,7 @@
 (defvar org-todoist-sync-interval 60 "The interval in seconds between sync requests with Todoist servers.")
 (defun org-todoist--set-last-response (JSON) (with-file! (org-todoist--storage-file "PREVIOUS.json") (insert JSON)))
 (defun org-todoist--storage-file (FILE) (concat (file-name-as-directory org-todoist--storage-dir) FILE))
-(defun org-todoist--set-sync-token (TOKEN) (with-file! (org-todoist--storage-file org-todoist--sync-token-file) (erase-buffer) (insert TOKEN)))
+(defun org-todoist--set-sync-token (TOKEN) (with-file! (org-todoist--storage-file org-todoist--sync-token-file) (goto-char (point-max)) (insert "\n") (insert TOKEN)))
 (defun org-todoist--get-sync-token ()
   (if (file-exists-p (org-todoist--storage-file org-todoist--sync-token-file))
       (let ((res (with-file-contents! (org-todoist--storage-file org-todoist--sync-token-file) (get-last-line))))
@@ -78,7 +79,9 @@
     "*"))
 
 (defun org-todoist--set-last-sync-buffer (AST) (with-file! (org-todoist--storage-file org-todoist--sync-buffer-file) (insert (org-todoist-org-element-to-string AST))))
-(defun org-todoist--get-last-sync-buffer-ast () (with-file-contents! (org-todoist--storage-file org-todoist--sync-buffer-file) (org-mode) (org-element-parse-buffer)))
+(defun org-todoist--get-last-sync-buffer-ast ()
+  (when (file-exists-p (org-todoist--storage-file org-todoist--sync-buffer-file))
+    (with-file-contents! (org-todoist--storage-file org-todoist--sync-buffer-file) (org-mode) (org-element-parse-buffer))))
 
 (defun get-last-line ()
   (save-excursion
@@ -94,9 +97,28 @@
   (interactive "P")
   (kill-buffer org-todoist-file)
   (delete-file (org-todoist-file))
+  (delete-file (org-todoist--storage-file "PREVIOUS.json"))
   (delete-file (org-todoist--storage-file org-todoist--sync-token-file))
   (delete-file (org-todoist--storage-file org-todoist--sync-buffer-file))
   (org-todoist--do-sync "*" ARG))
+
+(defun org-todoist--encode (DATA)
+  (mapconcat
+   (lambda (data)
+     (if (null (cdr data)) "[]"
+       (concat (car data) "="
+               (if (listp (cdr data))
+                   (json-encode (cdr data))
+	         (if (stringp (cdr data))
+                     (cdr data)
+                   (prin1-to-string (cdr data)))))))
+   (-filter (lambda (item) (cdr item)) DATA)
+   "&"))
+
+;; (ert-deftest org-todoist--test--encode ()
+;;   (org-todoist--encode `(("sync_token" . "*")
+;;                          ("resource_types" . ,org-todoist-resource-types)
+;;                          ("commands" . ,(org-todoist--push)))))
 
 (defun org-todoist--do-sync (TOKEN OPEN)
   (when (or (null org-todoist-api-token) (not (stringp org-todoist-api-token)))
@@ -105,28 +127,74 @@
   (let* ((url-request-method org-todoist-http-method)
          (url-request-extra-headers `(("Authorization" . ,(concat "Bearer " org-todoist-api-token))
                                       ("Content-Type" . ,org-todoist-request-type)))
-         (request-data `(("sync_token" . ,TOKEN) ("resource_types" . ,(json-encode org-todoist-resource-types))))
-         (url-request-data (mm-url-encode-www-form-urlencoded request-data)))
+         (request-data `(("sync_token" . ,TOKEN)
+                         ("resource_types" . ,(json-encode org-todoist-resource-types))
+                         ("commands" . , (org-todoist--push))))
+         (url-request-data (org-todoist--encode request-data)))
     (message (if OPEN "Syncing with todoist. Buffer will open when sync is complete..." "Syncing with todoist. This may take a moment..."))
     (url-retrieve org-todoist-sync-endpoint
                   (lambda (events open)
                     (if (plist-member events :error)
-                        (setq org-todoist--sync-err events)
+                        (progn (setq org-todoist--sync-err events)
+                               (message "Sync failed. See org-todoist--sync-err for details."))
                       (let ((resp (with-current-buffer (current-buffer)
                                     (goto-char url-http-end-of-headers)
                                     (decode-coding-region (point) (point-max) 'utf-8 t))))
                         (org-todoist--set-last-response resp)
-                        (org-todoist--parse-response (json-read-from-string resp) (org-todoist--file-ast)))
-                      (when open
-                        (find-file (org-todoist-file))
-                        (save-buffer)
-                        (org-fold-hide-drawer-all)
-                        (if (< org-todoist-show-n-levels 1)
-                            (org-content)
-                          (org-content org-todoist-show-n-levels)))))
+                        (org-todoist--parse-response (json-read-from-string resp) (org-todoist--file-ast))
+                        (when (get-buffer "todoist.org") ;; todoist buffer is open
+                          (save-window-excursion
+                            (find-file (org-todoist-file))
+                            (if (< org-todoist-show-n-levels 1)
+                                (org-content)
+                              (org-content org-todoist-show-n-levels))
+                            (org-fold-hide-drawer-all)))
+                        (when open ;; told to open the buffer
+                          (find-file (org-todoist-file))
+                          ;; (save-buffer)
+                          (if (< org-todoist-show-n-levels 1)
+                              (org-content)
+                            (org-content org-todoist-show-n-levels)))
+                        (message "Sync complete."))))
                   `(,OPEN)
                   'silent
                   'inhibit-cookies)))
+
+(defun org-todoist--push ()
+  (let ((commands '())
+        (ast (org-todoist--file-ast))
+        (old (org-todoist--get-last-sync-buffer-ast)))
+    ;; TODO map old and new so we can see anything deleted?
+    (org-element-map ast 'headline
+      (lambda (hl)
+        (let ((type (org-todoist--get-todoist-type hl)))
+          (cond ((string-equal type org-todoist--task-type)
+                 ;; TODO
+                 ;; Rescheduled;;item_update
+                 ;; Redeadlined;;item_update
+                 ;; Reeffort;;item_update
+                 ;; Create new todo items for new todos ;;item_add
+                 ;; changed title ;;item_update
+                 ;; changed description ;;item_update
+                 ;; changed section ;;item_move
+                 ;; changed project;;item_move
+                 (let* ((id (org-todoist--get-prop hl "ID"))
+                        (oldtask (org-todoist--get-by-id org-todoist--task-type id old))
+                        (todo-type (org-element-property :todo-type hl))
+                        (args nil))
+
+                   (when (not (equal (org-element-property :todo-type oldtask)
+                                     (org-element-property :todo-type hl)))
+                     (if (eq 'done todo-type)
+                         (push `(("uuid" . ,(org-id-uuid))
+                                 ("type" . "item_complete")
+                                 ("args" . ,`(("id" . ,id))))
+                               commands)
+                       (push `(("uuid" . ,(org-id-uuid))
+                               ("type" . "item_uncomplete")
+                               ("args" . ,`(("id" . ,id))))
+                             commands)))))))))
+    commands))
 
 (defun org-todoist--parse-response (RESPONSE AST)
   (let ((tasks (assoc-default 'items RESPONSE))
@@ -561,22 +629,16 @@ DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
 ;; (defun org-todoist--get-description-elements (NODE) (org-element-map NODE '('paragraph 'plain-text) #'identity nil nil 'plain-list)) ;; TODO this is failing in replace description with plain text included
 (defun org-todoist--get-description-elements (NODE) (org-element-map NODE 'paragraph #'identity nil nil 'plain-list))
 
-;; ;; TODO delete
-;; (org-todoist-org-element-to-string (org-todoist--get-by-id org-todoist--task-type "3"  (org-element-parse-buffer)))
-;; (org-element-contents (org-todoist--get-by-id org-todoist--task-type "3"  (org-element-parse-buffer)))
-;; (org-element-map (org-todoist--get-by-id org-todoist--task-type "3"  (org-element-parse-buffer)) 'paragraph (lambda (p) (org-todoist-org-element-to-string p)) nil nil 'plain-list )
 (defun org-todoist--description-text (NODE)
   "Combines all paragraphs under NODE and returns the concatenated string"
   (apply #'cl-concatenate 'string (org-element-map NODE 'paragraph (lambda (p) (org-todoist-org-element-to-string p)) nil nil 'plain-list)))
-;; (apply #'concatenate 'string (org-element-map (org-todoist--get-by-id org-todoist--task-type "3"  (org-element-parse-buffer)) 'paragraph (lambda (p) (org-todoist-org-element-to-string p)) nil nil 'plain-list ))
 ;; merge paragraphs, retain plain list
 
 (ert-deftest org-todoist--test--description-text ()
   (should (string-equal-ignore-case "Description
 
 More description
-"
-                                    (org-todoist--description-text (org-todoist--test-task)))))
+" (org-todoist--description-text (org-todoist--test-task)))))
 
 (defun org-todoist--category-node-query-or-create (AST DEFAULT TYPE)
   "Finds the first node of TODOIST_TYPE TYPE under AST, else create it with
@@ -589,7 +651,9 @@ DEFAULT text."
       (org-element-adopt AST target)
       target)))
 
-(defun org-todoist--node-type-query (NODE TYPE) (when (equal (org-todoist--get-prop NODE org-todoist--type) TYPE) NODE))
+(defun org-todoist--node-type-query (NODE TYPE)
+  (when (equal (org-todoist--get-prop NODE org-todoist--type) TYPE) NODE))
+
 (defun org-todoist--update-file (AST)
   "Replaces the org-todoist file with the org representation AST"
   (save-window-excursion (if (not (file-exists-p (org-todoist-file)))
@@ -597,9 +661,7 @@ DEFAULT text."
                          (find-file (org-todoist-file))
                          (erase-buffer)
                          (insert (org-todoist-org-element-to-string AST))
-                         (save-buffer)
-                         ;; (kill-buffer)
-                         ))
+                         (save-buffer)))
 
 (defun org-todoist--file-ast ()
   "Parses the AST of the org-todoist-file"
@@ -766,7 +828,6 @@ Returns nil if not present"
                     (lambda (prop) (when (org-todoist--is-property prop KEY) prop)) nil t)))
     (if existing
         (org-element-put-property existing KEY VALUE)
-      ;; (org-element-set prop (org-todoist--create-property KEY VALUE))
       (org-element-adopt DRAWER (org-todoist--create-property KEY VALUE)))))
 
 (ert-deftest org-todoist--test--add-prop--does-not-exist-works ()
@@ -807,7 +868,6 @@ Returns nil if not present"
   "Adds or updates the values of all properties in the alist PROPERTIES to
 NODE unless they are in plist SKIP. RETURNS the mutated NODE."
   (dolist (kv PROPERTIES)
-    ;; (unless (cl-member (car kv) SKIP)
     (unless (member (car kv) SKIP)
       (org-todoist--add-prop NODE (car kv) (cdr kv))))
   NODE)
@@ -966,8 +1026,6 @@ paragraph
     (string . "every day at 12")
     (lang . "en")
     (is_recurring . t)))
-
-;; input example for posting due dates "due": {"string":  "tomorrow"}
 
 (defvar test-label
   '((id . 790748)
