@@ -42,7 +42,7 @@ Features are read only (unidirectional sync) unless otherwise noted.
     - [ ] Comments
     - [X] Effort
     - [X] Priority
-    - [ ] Labels
+    - [X] Labels
     - [ ] Assigned to
     - [ ] Section and project changes
     - [ ] New sections

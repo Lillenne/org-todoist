@@ -263,22 +263,13 @@ TYPES can be a single symbol or a list of symbols."
         (let ((type (org-todoist--get-todoist-type hl)))
           (cond ((string-equal type org-todoist--task-type)
                  ;; TODO
-                 ;; Rescheduled;;item_update
-                 ;; Redeadlined;;item_update
-                 ;; Reeffort;;item_update
                  ;; Create new todo items for new todos ;;item_add
-                 ;; changed title ;;item_update
-                 ;; changed description ;;item_update
                  ;; changed section ;;item_move
                  ;; changed project;;item_move
                  (let* ((id (org-todoist--get-prop hl "ID"))
                         (oldtask (org-todoist--get-by-id org-todoist--task-type id old))
                         (todo-type (org-element-property :todo-type hl))
                         (args nil))
-                   ;; (message "oldn is null: %s" (null oldtask))
-                   ;; (sleep-for 2)
-                   ;; (message "old %s" (org-todoist-org-element-to-string oldtask))
-                   ;; (sleep-for 2)
                    ;; item_update
                    (when oldtask
                      (let* ((title (org-element-property :raw-value hl))
@@ -295,9 +286,10 @@ TYPES can be a single symbol or a list of symbols."
                             (eff (when effstr (org-duration-to-minutes effstr)))
                             (oldeffstr (org-todoist--get-prop oldtask "EFFORT"))
                             (oldeff (when oldeffstr (org-duration-to-minutes oldeffstr)))
-                            ;; (labels (org-element-property :tags hl))
-                            ;; (oldlabels (org-element-property :tags oldtask))
-                            ;; TODO labels, assigned to
+                            (labels (org-element-property :tags hl))
+                            (oldlabels (org-element-property :tags oldtask))
+                            ;; TODO labels,
+                            ;; assigned to
                             )
                        (when (or
                               (not (string-equal title oldtitle))
@@ -306,6 +298,7 @@ TYPES can be a single symbol or a list of symbols."
                               (not (string-equal (org-element-property :raw-value dead) (org-element-property :raw-value olddead)))
                               (not (equal eff oldeff))
                               (not (equal pri oldpri))
+                              (not (equal labels oldlabels))
                               ;; TODO labels
                               ;; TODO assigned to
                               )
@@ -319,7 +312,7 @@ TYPES can be a single symbol or a list of symbols."
                                                    ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled)) ;; TODO and does encode need to be recursive
                                                    ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
                                                    ("priority" . ,(org-todoist--get-priority hl))
-                                                   ;; ("labels" . ,nil) ;;TODO
+                                                   ("labels" . ,labels) ;;TODO
                                                    ;; ("responsible_uid" . ,nil) ;;TODO
                                                    )))))
                            (push req commands)))
