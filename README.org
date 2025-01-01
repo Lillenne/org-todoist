@@ -38,7 +38,7 @@ Features are read only (unidirectional sync) unless otherwise noted.
     - [X] Title
     - [X] Scheduled
     - [X] Deadline
-    - [ ] Description
+    - [X] Description
     - [ ] Comments
     - [X] Effort
     - [X] Priority
@@ -55,8 +55,10 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [X] Datetime for scheduled / deadline (time of day)
   - [X] Effort/Duration
   - [ ] Comments
+    - [ ] Text-only sync
     - [ ] notify on comment with @tag(?)
   - [ ] Subtask support
+  - [ ] Subproject support
 - [ ] Implement low priority task items
   - [ ] Recurring tasks
   - [ ] Markdown description support

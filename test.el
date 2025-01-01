@@ -34,7 +34,7 @@
 (defvar org-todoist-file "todoist.org")
 (defvar org-todoist-user-headline "Collaborators")
 (defvar org-todoist-project-headline "Projects")
-(defvar org-todoist-show-n-levels 3
+(defvar org-todoist-show-n-levels 4
   "The number of headline levels to show. 2=projects, 3=sections, 4=root tasks, -1 no fold")
 (defvar org-todoist-todo-keyword "TODO")
 (defvar org-todoist-done-keyword "DONE")
@@ -57,9 +57,9 @@
 (defconst org-todoist--user-node-type "USER_HEADLINE")
 (defconst org-todoist--project-node-type "PROJECT_HEADLINE")
 (defconst org-todoist--sync-areas ["collaborators", "projects", "items", "sections"])
-(defconst org-todoist--project-skip-list `('name ,(intern "name"))) ;; the intern cmd fixes double prop adding. both are required tbd why
-(defconst org-todoist--section-skip-list `('name ,(intern "name"))) ;; the intern cmd fixes double prop adding. both are required tbd why
-(defconst org-todoist--task-skip-list `('name ,(intern "name") 'description ,(intern "description"))) ;; the intern cmd fixes double prop adding. both are required tbd why
+(defconst org-todoist--project-skip-list '(name can_assign_tasks collapsed color is_archived is_deleted is_favorite is_frozen sync_id v2_id v2_parent_id view_style))
+(defconst org-todoist--section-skip-list '(name project_id sync_id updated_at v2_id v2_project_id is_deleted is_archived collapsed archived_at section_order))
+(defconst org-todoist--task-skip-list '(name completed_at content collapsed duration description checked deadline due labels priority project_id section_id sync_id v2_id v2_parent_id v2_project_id v2_section_id completed_at content day_order is_deleted))
 (defconst org-todoist--sync-token-file "SYNC-TOKEN")
 (defconst org-todoist--sync-buffer-file "SYNC-BUFFER")
 
@@ -77,7 +77,7 @@
         (if res res "*"))
     "*"))
 
-(defun org-todoist--set-last-sync-buffer (AST) (with-file! (org-todoist--storage-file org-todoist--sync-buffer-file) (insert (org-todoist-org-element-to-string AST))))
+(defun org-todoist--set-last-sync-buffer (AST) (with-file! (org-todoist--storage-file org-todoist--sync-buffer-file) (org-mode) (insert (org-todoist-org-element-to-string AST))))
 (defun org-todoist--get-last-sync-buffer-ast ()
   (when (file-exists-p (org-todoist--storage-file org-todoist--sync-buffer-file))
     (with-file-contents! (org-todoist--storage-file org-todoist--sync-buffer-file) (org-mode) (org-element-parse-buffer))))
@@ -90,7 +90,7 @@
                                         ;API Requests;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist-sync (&optional ARG)
   (interactive "P")
-  (org-todoist--do-sync (org-todoist--get-sync-token) ARG))
+  (org-todoist--do-sync (org-todoist--get-sync-token) (null ARG)))
 
 (defun org-todoist-reset (&optional ARG)
   (interactive "P")
@@ -99,7 +99,7 @@
   (delete-file (org-todoist--storage-file "PREVIOUS.json"))
   (delete-file (org-todoist--storage-file org-todoist--sync-token-file))
   (delete-file (org-todoist--storage-file org-todoist--sync-buffer-file))
-  (org-todoist--do-sync "*" ARG))
+  (org-todoist--do-sync "*" (null ARG)))
 
 (defun org-todoist--encode (DATA)
   (mapconcat
@@ -283,8 +283,8 @@ TYPES can be a single symbol or a list of symbols."
                    (when oldtask
                      (let* ((title (org-element-property :raw-value hl))
                             (oldtitle (org-element-property :raw-value oldtask))
-                            ;; (desc (org-todoist--description-text hl))
-                            ;; (olddesc (org-todoist--description-text oldtask))
+                            (desc (org-todoist--description-text hl))
+                            (olddesc (org-todoist--description-text oldtask))
                             (pri (org-element-property :priority hl))
                             (oldpri (org-element-property :priority oldtask))
                             (sch (org-element-property :scheduled hl))
@@ -314,7 +314,7 @@ TYPES can be a single symbol or a list of symbols."
                                       ("uuid" . ,(org-id-uuid))
                                       ("args" . ,`(("id" . ,id)
                                                    ("content" . ,title)
-                                                   ;; ("description" . ,desc) ;;TODO fix
+                                                   ("description" . ,(when desc desc)) ;;TODO fix
                                                    ("duration" . ,(when eff `(("amount" . ,eff) ("unit" . "minute"))))
                                                    ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled)) ;; TODO and does encode need to be recursive
                                                    ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
@@ -474,7 +474,7 @@ TYPES can be a single symbol or a list of symbols."
           ;; Replace the description
           (dolist (paragraph (org-todoist--get-description-elements NODE))
             (if (eql idx 0)
-                (org-element-set paragraph (org-element-create 'paragraph nil DESCRIPTION))
+                (org-element-set paragraph (org-element-create 'plain-text nil DESCRIPTION))
               (org-element-extract paragraph))
             (cl-incf idx))
           (when (eql idx 0) (org-todoist--add-description NODE DESCRIPTION)) ;; There was no description, add the new one
@@ -634,16 +634,17 @@ DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
   (org-element-map NODE 'headline (lambda (hl) (when (string-equal (org-element-property :raw-value hl) VALUE) hl))))
 
 (defun org-todoist--get-node-attributes (NODE) (cadr NODE))
-(defun org-todoist--get-node-attribute (NODE ATTRIBUTE) (plist-get (org-todoist--get-node-attributes NODE)
-                                                                   (if (stringp ATTRIBUTE)
-                                                                       (intern (concat ":" (upcase ATTRIBUTE)))
-                                                                     ATTRIBUTE)))
+(defun org-todoist--get-node-attribute (NODE ATTRIBUTE)
+  (plist-get (org-todoist--get-node-attributes NODE) (org-todoist--to-symbol ATTRIBUTE)))
 
 ;; ;; Not working as a new plist is returned. Needs to mutate
 (defun org-todoist--put-node-attribute (NODE ATTRIBUTE VALUE)
   (setcar (cdr NODE) (plist-put (org-todoist--get-node-attributes NODE)
-                                (if (stringp ATTRIBUTE) (intern (concat ":" (upcase ATTRIBUTE))) ATTRIBUTE)
+                                (org-todoist--to-symbol ATTRIBUTE)
                                 VALUE)))
+
+(defun org-todoist--to-symbol (SYMBOL-OR-STRING)
+  (if (stringp SYMBOL-OR-STRING) (intern (concat ":" (upcase SYMBOL-OR-STRING))) SYMBOL-OR-STRING))
 
 ;; (defun org-todoist--get-headline-by-title-value (NODE VALUE)
 ;;   (org-element-map NODE 'headline (lambda (hl) (when (string-equal (org-element-property :raw-title hl) VALUE) hl))))
@@ -777,11 +778,25 @@ DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
     (should (string-equal-ignore-case "updated" (org-todoist--get-prop-elem updated :title)))))
 
 ;; (defun org-todoist--get-description-elements (NODE) (org-element-map NODE '('paragraph 'plain-text) #'identity nil nil 'plain-list)) ;; TODO this is failing in replace description with plain text included
-(defun org-todoist--get-description-elements (NODE) (org-element-map NODE 'paragraph #'identity nil nil 'plain-list))
+(defun org-todoist--get-description-elements (NODE)
+  "Gets all paragraph elements that are not in a drawer."
+  (org-element-map NODE t #'org-todoist--is-description-element nil nil 'drawer))
+;; (org-element-map NODE 'paragraph #'org-todoist--is-description-element))
+;; (defun org-todoist--get-description-elements (NODE) (org-element-map NODE 'paragraph #'identity nil nil 'plain-list))
+
+(defun org-todoist--is-description-element (NODE)
+  "t if the NODE is a paragraph element and is not in a drawer."
+  ;; TODO this doesn't seem to be working properly. Doesn't filter out items in drawers.
+  (when (eq (org-element-type NODE) 'paragraph)
+    (let ((closest-hl-or-drawer (org-element-lineage-map NODE #'identity '('drawer 'headline) nil t)))
+      (unless (eq 'drawer (org-element-type closest-hl-or-drawer)) NODE))))
 
 (defun org-todoist--description-text (NODE)
   "Combines all paragraphs under NODE and returns the concatenated string"
-  (apply #'cl-concatenate 'string (org-element-map NODE 'paragraph (lambda (p) (org-todoist-org-element-to-string p)) nil nil 'plain-list)))
+  (mapconcat #'org-todoist-org-element-to-string (org-todoist--get-description-elements NODE)))
+;; (apply #'concat (org-todoist--get-description-elements NODE)))
+;; (apply #'concat (org-element-map NODE 'paragraph (lambda (p) (org-todoist-org-element-to-string p)))))
+;; (apply #'cl-concatenate 'string (org-element-map NODE 'paragraph (lambda (p) (org-todoist-org-element-to-string p)) nil nil 'plain-list)))
 ;;TODO This isn't working in current push? Need to get raw-value or similar prop instead of tostring?
 ;; merge paragraphs, retain plain list
 
@@ -948,7 +963,7 @@ Replaces the current value with VALUE if property KEY already exists."
           ((eq type 'headline) ;; Find drawer and update both drawer and property plist
            (let* ((headline DRAWER)
                   (drawer (org-todoist--get-property-drawer headline)))
-             (org-todoist--put-node-attribute headline KEY VALUE) ;; update property plist
+             (org-todoist--put-node-attribute headline (org-todoist--to-symbol KEY) VALUE) ;; update property plist
              (unless drawer ;; create drawer if needed
                (setq drawer (org-element-create 'property-drawer))
                (org-element-adopt DRAWER drawer))
@@ -978,7 +993,7 @@ Returns nil if not present"
   (let ((existing (org-element-map DRAWER 'node-property
                     (lambda (prop) (when (org-todoist--is-property prop KEY) prop)) nil t)))
     (if existing
-        (org-element-put-property existing KEY VALUE)
+        (org-element-put-property existing (org-todoist--to-symbol KEY) VALUE)
       (org-element-adopt DRAWER (org-todoist--create-property KEY VALUE)))))
 
 (ert-deftest org-todoist--test--add-prop--does-not-exist-works ()
