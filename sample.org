@@ -25,6 +25,7 @@ Description
 
 More description
 **** TODO [#A] Task 1
+DEADLINE: <2025-01-01 Wed 00:01> SCHEDULED: <2024-12-31 Tue 23:59>
 :PROPERTIES:
 :TODOIST_TYPE: TASK
 :child_order: 1

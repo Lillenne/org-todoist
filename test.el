@@ -65,7 +65,6 @@
 
 
                                         ;Data;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; (defvar org-todoist--sync-token nil "The sync token string for peforming incremental sync")
 (defvar org-todoist--storage-dir (concat (file-name-as-directory (xdg-cache-home))  "org-todoist") "Directory for org-todoist storage.")
 (defvar org-todoist--sync-err nil "The error from the last sync, if any")
 (defvar org-todoist-sync-interval 60 "The interval in seconds between sync requests with Todoist servers.")
@@ -112,8 +111,37 @@
 	         (if (stringp (cdr data))
                      (cdr data)
                    (prin1-to-string (cdr data)))))))
+   ;; (-filter (lambda (item) (and (listp item) (cdr item))) DATA)
    (-filter (lambda (item) (cdr item)) DATA)
    "&"))
+
+(defun org-todoist--encode-item (ITEM)
+  (if (json-alist-p (cdr ITEM))
+      (concat (car ITEM)
+              (org-todoist--encode-item ITEM))
+    (json-encode ITEM)))
+
+;; (ert-deftest org-todoist--test--encode-item ()
+;;   (let ((args '("args" . (("id" . "5")
+;;                                   ("content" . "test content")
+;;                                   ("priority" . 1))))
+;;         (data '(("type" . "item_update")
+;;                      ("uuid" . "393491b2-6ef8-4045-b208-20a84c51eb42")
+;;                      ("args" . (("id" . "5")
+;;                                   ("content" . "test content")
+;;                                   ("priority" . 1))))))
+
+;;     ;; (json-encode (cdr args))
+;;     ;; (org-todoist--encode args)
+;;     ;; (json-alist-p (cdr args))
+;;     ;; ;; (if (json-alist-p (cdr item)
+;;     ;;                   ))
+;;     ;; (org-todoist--encode-item (cdr args)                  )
+;;     (json-encode data)
+;;     ;; (org-todoist--encode-item
+
+;;     )
+;;   )
 
 ;; (ert-deftest org-todoist--test--encode ()
 ;;   (org-todoist--encode `(("sync_token" . "*")
@@ -131,6 +159,10 @@
                          ("resource_types" . ,(json-encode org-todoist-resource-types))
                          ("commands" . , (org-todoist--push))))
          (url-request-data (org-todoist--encode request-data)))
+    (with-file! "/home/aus/projects/org-todoist/sch"
+      (insert url-request-data))
+    ;; (message "stop")
+    ;; (sleep-for 300)
     (message (if OPEN "Syncing with todoist. Buffer will open when sync is complete..." "Syncing with todoist. This may take a moment..."))
     (url-retrieve org-todoist-sync-endpoint
                   (lambda (events open)
@@ -160,6 +192,67 @@
                   'silent
                   'inhibit-cookies)))
 
+(defun org-todoist--first-parent-of-type (NODE TYPES)
+  "Gets the first parent which is one of the given TYPES.
+TYPES can be a single symbol or a list of symbols."
+  (org-element-lineage-map NODE #'identity TYPES nil t))
+
+(ert-deftest org-todoist--test--first-parent-of-type ()
+  (let* ((ast (org-todoist--generate-sample-ast))
+         (task (org-todoist--get-by-id org-todoist--task-type "3" ast))
+         (section (org-todoist--get-by-id org-todoist--section-type "2" ast)))
+    (should (eq (org-todoist--first-parent-of-type task 'headline)
+                section))))
+
+(defun org-todoist--get-planning-date (NODE KEYWORD)
+  (let ((prop (org-element-property KEYWORD NODE)))
+    (when prop (org-todoist--date-to-todoist prop))))
+;; (org-todoist--date-to-todoist (org-element-property KEYWORD (org-todoist--get-planning NODE)))) ;; Can just grab from the headline. May not have planning
+
+(defun org-todoist--get-planning (NODE)
+  "Gets the planning element for specified headline"
+  (unless (eq (org-element-type NODE) 'headline) (error "org-todoist--get--planning only supports headline input nodes"))
+  (car (org-element-map NODE 'planning (lambda (planning)
+                                         (when (eq NODE
+                                                   (org-todoist--first-parent-of-type planning 'headline))
+                                           planning)))))
+
+(defun org-todoist--date-to-todoist (TIMESTAMP)
+  (concat
+   (number-to-string (org-element-property :year-start TIMESTAMP))
+   "-"
+   (number-to-string (org-element-property :month-start TIMESTAMP))
+   "-"
+   (number-to-string (org-element-property :day-start TIMESTAMP))
+   (when (org-element-property :hour-start TIMESTAMP) ;; has time component
+     (let ((hour (org-element-property :hour-start TIMESTAMP))
+           (minute (org-element-property :minute-start TIMESTAMP)))
+       (concat "T"
+               (when (> 10 hour) "0") ;; pad to 2 char with 0
+               (number-to-string hour)
+               ":"
+               (when (> 10 minute) "0") ;; pad to 2 char with 0
+               (number-to-string minute)
+               ":00.000000")))))
+
+(ert-deftest org-todoist--test--date-to-todoist ()
+  (let* ((task (org-todoist--test-task))
+         (org-todoist--)
+         (planning (org-todoist--get-planning task))
+         (schtimestamp (org-element-property :scheduled planning)))
+    (should (string-equal "2024-12-31T23:59:000000" (org-todoist--get-planning-date task :scheduled)))
+    (should (string-equal "2024-12-31T23:59:000000" (org-todoist--date-to-todoist schtimestamp)))))
+
+(defun org-todoist--todoist-date-object-for-kw (NODE KEYWORD)
+  (let ((dl (org-todoist--get-planning-date NODE KEYWORD)))
+    (when dl
+      `(("date" . ,dl)
+        ;; ("lang" . "en")
+        ;; ("string" . ,dl)
+        ;; ("timezone")
+        ;; ("is_recurring" . :json-false)
+        ))))
+
 (defun org-todoist--push ()
   (let ((commands '())
         (ast (org-todoist--file-ast))
@@ -182,18 +275,67 @@
                         (oldtask (org-todoist--get-by-id org-todoist--task-type id old))
                         (todo-type (org-element-property :todo-type hl))
                         (args nil))
+                   ;; (message "oldn is null: %s" (null oldtask))
+                   ;; (sleep-for 2)
+                   ;; (message "old %s" (org-todoist-org-element-to-string oldtask))
+                   ;; (sleep-for 2)
+                   ;; item_update
+                   (when oldtask
+                     (let* ((title (org-element-property :raw-value hl))
+                            (oldtitle (org-element-property :raw-value oldtask))
+                            ;; (desc (org-todoist--description-text hl))
+                            ;; (olddesc (org-todoist--description-text oldtask))
+                            (pri (org-element-property :priority hl))
+                            (oldpri (org-element-property :priority oldtask))
+                            (sch (org-element-property :scheduled hl))
+                            (oldsch (org-element-property :scheduled oldtask))
+                            (dead (org-element-property :deadline hl))
+                            (olddead (org-element-property :deadline oldtask))
+                            (effstr (org-todoist--get-prop hl "EFFORT"))
+                            (eff (when effstr (org-duration-to-minutes effstr)))
+                            (oldeffstr (org-todoist--get-prop oldtask "EFFORT"))
+                            (oldeff (when oldeffstr (org-duration-to-minutes oldeffstr)))
+                            ;; (labels (org-element-property :tags hl))
+                            ;; (oldlabels (org-element-property :tags oldtask))
+                            ;; TODO labels, assigned to
+                            )
+                       (when (or
+                              (not (string-equal title oldtitle))
+                              ;; (not (equal desc olddesc))
+                              (not (string-equal (org-element-property :raw-value sch) (org-element-property :raw-value oldsch)))
+                              (not (string-equal (org-element-property :raw-value dead) (org-element-property :raw-value olddead)))
+                              (not (equal eff oldeff))
+                              (not (equal pri oldpri))
+                              ;; TODO labels
+                              ;; TODO assigned to
+                              )
+                         (let (
+                               (req `(("type" . "item_update")
+                                      ("uuid" . ,(org-id-uuid))
+                                      ("args" . ,`(("id" . ,id)
+                                                   ("content" . ,title)
+                                                   ;; ("description" . ,desc) ;;TODO fix
+                                                   ("duration" . ,(when eff `(("amount" . ,eff) ("unit" . "minute"))))
+                                                   ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled)) ;; TODO and does encode need to be recursive
+                                                   ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
+                                                   ("priority" . ,(org-todoist--get-priority hl))
+                                                   ;; ("labels" . ,nil) ;;TODO
+                                                   ;; ("responsible_uid" . ,nil) ;;TODO
+                                                   )))))
+                           (push req commands)))
 
-                   (when (not (equal (org-element-property :todo-type oldtask)
-                                     (org-element-property :todo-type hl)))
-                     (if (eq 'done todo-type)
-                         (push `(("uuid" . ,(org-id-uuid))
-                                 ("type" . "item_complete")
-                                 ("args" . ,`(("id" . ,id))))
-                               commands)
-                       (push `(("uuid" . ,(org-id-uuid))
-                               ("type" . "item_uncomplete")
-                               ("args" . ,`(("id" . ,id))))
-                             commands)))))))))
+                       ;; todo-state changed
+                       (when (not (equal (org-element-property :todo-type oldtask)
+                                         (org-element-property :todo-type hl)))
+                         (if (eq 'done todo-type)
+                             (push `(("uuid" . ,(org-id-uuid))
+                                     ("type" . "item_complete") ;; todo item_close instead?
+                                     ("args" . ,`(("id" . ,id)))) ;; TODO closed date
+                                   commands)
+                           (push `(("uuid" . ,(org-id-uuid))
+                                   ("type" . "item_uncomplete")
+                                   ("args" . ,`(("id" . ,id))))
+                                 commands)))))))))))
     commands))
 
 (defun org-todoist--parse-response (RESPONSE AST)
@@ -311,7 +453,7 @@
       hl
     0))
 
-(defun org-todoist--create-node (TYPE TEXT DESCRIPTION &optional PROPERTIES PARENT SKIP) ;; TODO priority? Other values?
+(defun org-todoist--create-node (TYPE TEXT DESCRIPTION &optional PROPERTIES PARENT SKIP)
   "Creates node of TODOIST_TYPE TYPE with default TEXT and PROPERTIES under PARENT."
   (let ((node (org-element-create 'headline `(:title ,TEXT :level ,(+ 1 (org-todoist--get-headline-level PARENT))))))
     (org-todoist--insert-identifier node TYPE)
@@ -559,6 +701,14 @@ DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
                                             ((equal PRIORITY 2) ?C)
                                             ((equal PRIORITY 1) ?D))))
 
+(defun org-todoist--get-priority (NODE)
+  (let ((priority (org-element-property :priority NODE)))
+    (cond
+     ((equal priority ?A) 4)
+     ((equal priority ?B) 3)
+     ((equal priority ?C)  2)
+     ((equal priority ?D)  1))))
+
 (defun org-todoist--set-todo (NODE CHECKED)
   (if (eql t CHECKED) ;; :json-false for false currently, t for true
       (progn
@@ -632,6 +782,7 @@ DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
 (defun org-todoist--description-text (NODE)
   "Combines all paragraphs under NODE and returns the concatenated string"
   (apply #'cl-concatenate 'string (org-element-map NODE 'paragraph (lambda (p) (org-todoist-org-element-to-string p)) nil nil 'plain-list)))
+;;TODO This isn't working in current push? Need to get raw-value or similar prop instead of tostring?
 ;; merge paragraphs, retain plain list
 
 (ert-deftest org-todoist--test--description-text ()
@@ -946,6 +1097,7 @@ NODE unless they are in plist SKIP. RETURNS the mutated NODE."
 (defun org-todoist--sample-response () (with-file-contents! "/home/aus/projects/org-todoist/api-call.json" (json-read)))
 
 (defun org-todoist--test-task () (org-todoist--get-by-id org-todoist--task-type "3" (org-todoist--generate-sample-ast)))
+(defun org-todoist--test-task-section () (org-todoist--get-by-id org-todoist--section-type "555" (org-todoist--generate-sample-ast)))
 (defun org-todoist--test-task-done () (org-todoist--get-by-id org-todoist--task-type "8888" (org-todoist--generate-sample-ast)))
 
                                         ;Test Data;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

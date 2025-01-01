@@ -35,9 +35,15 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [ ] Automated sync read updates(?)
   - [-] Push updates
     - [X] TODO state
-    - [ ] Title
+    - [X] Title
+    - [X] Scheduled
+    - [X] Deadline
     - [ ] Description
     - [ ] Comments
+    - [X] Effort
+    - [X] Priority
+    - [ ] Labels
+    - [ ] Assigned to
     - [ ] Section and project changes
     - [ ] New sections
     - [ ] New projects
@@ -53,6 +59,7 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [ ] Subtask support
 - [ ] Implement low priority task items
   - [ ] Recurring tasks
+  - [ ] Markdown description support
 - [ ] Bugs
   - [ ] Completed time sometimes in UTC
 * Not currently planning to implement
