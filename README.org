@@ -12,7 +12,11 @@ Org mode is an excellent planning and note-taking tool, but struggles in a few a
 Todoist fills these gaps and, more importantly, my wife uses it.
 
 There is currently [[https://github.com/abrochard/emacs-todoist][another excellent integration]] for org-mode and todoist, but it takes a fundamentally different approach (stateless on-demand regeneration with the [[https://developer.todoist.com/rest/v2/#overview][REST API]] vs stateful syncing with the [[https://developer.todoist.com/sync/v9/#overview][sync API]] that can be queried by [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly]] on mobile and buffer creation with org.el vs [[https://orgmode.org/worg/dev/org-element-api.html][org-element-api]]).
-* Features and roadmap
+* Features
+
+** Notes
+- Once a task has been permanently deleted in Todoist, changing the TODO state in org will be reset back to org-todoist-deleted-keyword on next sync. Todoist does not support reviving permanently deleted tasks.
+* Roadmap
 
 Features are read only (unidirectional sync) unless otherwise noted.
 
@@ -46,13 +50,15 @@ Features are read only (unidirectional sync) unless otherwise noted.
     - [X] Labels
     - [ ] Assigned to
     - [ ] Section and project changes
+    - [X] Refile to section
+    - [X] Refile to project
     - [X] New tasks
     - [ ] New sections
     - [ ] New projects
-    - [ ] Deletions
+    - [-] Deletions
       - [ ] Sections
       - [ ] Projects
-      - [ ] Tasks
+      - [X] Tasks
 - [-] Add non-essential task items
   - [X] Datetime for scheduled / deadline (time of day)
   - [X] Effort/Duration
