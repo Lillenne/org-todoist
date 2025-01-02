@@ -20,6 +20,7 @@
 ;;; Code:
 (require 'ert)
 (require 'url)
+(require 'ts)
 (require 'org)
 (require 'json)
 (require 'dash)
@@ -34,6 +35,7 @@
 (defvar org-todoist-file "todoist.org")
 (defvar org-todoist-user-headline "Collaborators")
 (defvar org-todoist-project-headline "Projects")
+(defvar org-todoist-tz nil)
 (defvar org-todoist-show-n-levels 4
   "The number of headline levels to show. 2=projects, 3=sections, 4=root tasks, -1 no fold")
 (defvar org-todoist-todo-keyword "TODO")
@@ -218,26 +220,30 @@ TYPES can be a single symbol or a list of symbols."
                                            planning)))))
 
 (defun org-todoist--date-to-todoist (TIMESTAMP)
-  (concat
-   (number-to-string (org-element-property :year-start TIMESTAMP))
-   "-"
-   (number-to-string (org-element-property :month-start TIMESTAMP))
-   "-"
-   (number-to-string (org-element-property :day-start TIMESTAMP))
-   (when (org-element-property :hour-start TIMESTAMP) ;; has time component
-     (let ((hour (org-element-property :hour-start TIMESTAMP))
-           (minute (org-element-property :minute-start TIMESTAMP)))
-       (concat "T"
-               (when (> 10 hour) "0") ;; pad to 2 char with 0
-               (number-to-string hour)
-               ":"
-               (when (> 10 minute) "0") ;; pad to 2 char with 0
-               (number-to-string minute)
-               ":00.000000")))))
+  (let (
+        (month (org-element-property :month-start TIMESTAMP))
+        (day (org-element-property :day-start TIMESTAMP)))
+    (concat
+     (number-to-string (org-element-property :year-start TIMESTAMP))
+     "-"
+     (when (< month 10) "0")
+     (number-to-string month)
+     "-"
+     (when (< day 10) "0")
+     (number-to-string day)
+     (when (org-element-property :hour-start TIMESTAMP) ;; has time component
+       (let ((hour (org-element-property :hour-start TIMESTAMP))
+             (minute (org-element-property :minute-start TIMESTAMP)))
+         (concat "T"
+                 (when (> 10 hour) "0") ;; pad to 2 char with 0
+                 (number-to-string hour)
+                 ":"
+                 (when (> 10 minute) "0") ;; pad to 2 char with 0
+                 (number-to-string minute)
+                 ":00.0"))))))
 
 (ert-deftest org-todoist--test--date-to-todoist ()
   (let* ((task (org-todoist--test-task))
-         (org-todoist--)
          (planning (org-todoist--get-planning task))
          (schtimestamp (org-element-property :scheduled planning)))
     (should (string-equal "2024-12-31T23:59:000000" (org-todoist--get-planning-date task :scheduled)))
@@ -246,12 +252,14 @@ TYPES can be a single symbol or a list of symbols."
 (defun org-todoist--todoist-date-object-for-kw (NODE KEYWORD)
   (let ((dl (org-todoist--get-planning-date NODE KEYWORD)))
     (when dl
-      `(("date" . ,dl)
-        ;; ("lang" . "en")
-        ;; ("string" . ,dl)
-        ;; ("timezone")
-        ;; ("is_recurring" . :json-false)
-        ))))
+      (let ((res `(("date" . ,dl)
+                   ;; ("lang" . "en")
+                   ;; ("string" . ,dl)
+                   ;; ("timezone" . ,(if org-todoist-tz org-todoist-tz (cadr (current-time-zone))))
+                   ;; ("is_recurring" . :json-false)
+                   )))
+        (when org-todoist-tz (push `("timezone" . ,org-todoist-tz) res))
+        res))))
 
 (defun org-todoist--push ()
   (let ((commands '())
@@ -288,18 +296,16 @@ TYPES can be a single symbol or a list of symbols."
                             (oldeff (when oldeffstr (org-duration-to-minutes oldeffstr)))
                             (labels (org-element-property :tags hl))
                             (oldlabels (org-element-property :tags oldtask))
-                            ;; TODO labels,
                             ;; assigned to
                             )
                        (when (or
                               (not (string-equal title oldtitle))
-                              ;; (not (equal desc olddesc))
+                              (not (equal desc olddesc))
                               (not (string-equal (org-element-property :raw-value sch) (org-element-property :raw-value oldsch)))
                               (not (string-equal (org-element-property :raw-value dead) (org-element-property :raw-value olddead)))
                               (not (equal eff oldeff))
                               (not (equal pri oldpri))
                               (not (equal labels oldlabels))
-                              ;; TODO labels
                               ;; TODO assigned to
                               )
                          (let (
@@ -307,12 +313,12 @@ TYPES can be a single symbol or a list of symbols."
                                       ("uuid" . ,(org-id-uuid))
                                       ("args" . ,`(("id" . ,id)
                                                    ("content" . ,title)
-                                                   ("description" . ,(when desc desc)) ;;TODO fix
+                                                   ("description" . ,(when desc desc))
                                                    ("duration" . ,(when eff `(("amount" . ,eff) ("unit" . "minute"))))
-                                                   ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled)) ;; TODO and does encode need to be recursive
+                                                   ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
                                                    ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
                                                    ("priority" . ,(org-todoist--get-priority hl))
-                                                   ("labels" . ,labels) ;;TODO
+                                                   ("labels" . ,labels)
                                                    ;; ("responsible_uid" . ,nil) ;;TODO
                                                    )))))
                            (push req commands)))
@@ -322,8 +328,10 @@ TYPES can be a single symbol or a list of symbols."
                                          (org-element-property :todo-type hl)))
                          (if (eq 'done todo-type)
                              (push `(("uuid" . ,(org-id-uuid))
-                                     ("type" . "item_complete") ;; todo item_close instead?
-                                     ("args" . ,`(("id" . ,id)))) ;; TODO closed date
+                                     ("type" . "item_complete")
+                                     ("args" . ,`(("id" . ,id)
+                                                  ("date_completed" .
+                                                   ,(org-todoist--timestamp-to-utc-str (org-element-property :closed hl))))))
                                    commands)
                            (push `(("uuid" . ,(org-id-uuid))
                                    ("type" . "item_uncomplete")
@@ -528,7 +536,32 @@ body DESCRIPTION, and drawer PROPERTIES, ignoring SKIP, under PARENT."
     (org-todoist--get-timestamp2 date)))
 
 (defun org-todoist--get-timestamp2 (date)
-  (when (org-todoist--has-date date) (org-timestamp-from-time (org-read-date nil t date nil) (not (eql 10 (length date)))))) ;; Todoist date format for tasks without a time is 10 char string
+  ;; TODO more efficient utc conversions
+  (when (org-todoist--has-date date)
+    (let ((hastime (not (eql 10 (length date)))));; Todoist date format for tasks without a time is 10 char string
+      (if (not (string= (substring date (- (length date) 1)) "Z"))
+          (org-timestamp-from-time (org-read-date nil t date nil) hastime)
+        (org-todoist--timestamp-from-utc-str date hastime)))))
+
+(defun org-todoist--timestamp-from-utc-str (STRING &optional WITH-TIME)
+  "Creates an an org mode timestamp element from STRING, which is an RFC3339
+datetime string. With arg WITH-TIME include the time-of-day portion in the
+timestamp"
+  (org-timestamp-from-string (concat "<"
+                                     (ts-format
+                                      (if WITH-TIME "%Y-%m-%d %a %H:%M" "Y-%m-%d %a")
+                                      (ts-adjust 'second (car (current-time-zone)) (ts-parse-org-element (org-timestamp-from-time (org-read-date nil t STRING nil) hastime))))
+                                     ">")))
+
+(defun org-todoist--timestamp-to-utc-str (TIMESTAMP)
+  "Converts org timestamp element to utc RFC3339 string"
+  (ts-format "%Y-%m-%dT%H:%M:%S.0Z"
+             (ts-adjust 'second (- (car (current-time-zone))) (ts-parse-org-element TIMESTAMP))))
+
+(ert-deftest org-todoist--test--timestamp-to-utc-str ()
+  (let* ((ts (org-timestamp-from-string "<2025-01-01 23:30>"))
+         (str (org-todoist--timestamp-to-utc-str ts)))
+    (should (string= str "2025-01-02T07:30:00.0Z"))))
 
 (defun org-todoist--has-date (DATE)
   (not (or (null DATE) (string-equal "" DATE) (string-equal "null" DATE))))

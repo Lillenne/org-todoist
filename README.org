@@ -26,7 +26,7 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [X] Tags/labels
   - [X] Scheduled
   - [X] Deadline
-  - [X] Completed
+  - [X] Completed (currently in utc)
   - [X] Priority
   - [ ] Assignee
   - [ ] Skip properties to reduce drawer size
@@ -38,6 +38,7 @@ Features are read only (unidirectional sync) unless otherwise noted.
     - [X] Title
     - [X] Scheduled
     - [X] Deadline
+    - [X] Completed
     - [X] Description
     - [ ] Comments
     - [X] Effort
