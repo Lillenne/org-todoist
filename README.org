@@ -29,7 +29,7 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [X] Completed (currently in utc)
   - [X] Priority
   - [ ] Assignee
-  - [ ] Skip properties to reduce drawer size
+  - [X] Skip properties to reduce drawer size
 - [-] Implement sync updates
   - [X] Manual sync read updates
   - [ ] Automated sync read updates(?)
@@ -46,6 +46,7 @@ Features are read only (unidirectional sync) unless otherwise noted.
     - [X] Labels
     - [ ] Assigned to
     - [ ] Section and project changes
+    - [X] New tasks
     - [ ] New sections
     - [ ] New projects
     - [ ] Deletions
@@ -60,6 +61,9 @@ Features are read only (unidirectional sync) unless otherwise noted.
     - [ ] notify on comment with @tag(?)
   - [ ] Subtask support
   - [ ] Subproject support
+- [ ] Essential project packaging
+  - [ ] Provide functions in package el file
+  - [ ] Remove dev local hardcoded paths
 - [ ] Implement low priority task items
   - [ ] Recurring tasks
   - [ ] Markdown description support
