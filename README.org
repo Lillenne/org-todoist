@@ -34,9 +34,10 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [X] Priority
   - [X] Assignee
   - [X] Skip properties to reduce drawer size
-  - [ ] Recurring tasks
+  - [-] Recurring tasks (has basic support, missing many natural language recurring due dates)
 - [-] Implement sync updates
   - [X] Manual sync read updates
+  - [ ] Quick add
   - [ ] Automated sync read updates(?)
   - [-] Push updates
     - [X] TODO state

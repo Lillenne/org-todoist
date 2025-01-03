@@ -280,13 +280,52 @@ TYPES can be a single symbol or a list of symbols."
   (let ((dl (org-todoist--get-planning-date NODE KEYWORD)))
     (when dl
       (let ((res `(("date" . ,dl)
-                   ;; ("lang" . "en")
+                   ("lang" . ,org-todoist-lang)
                    ;; ("string" . ,dl)
                    ;; ("timezone" . ,(if org-todoist-tz org-todoist-tz (cadr (current-time-zone))))
-                   ;; ("is_recurring" . :json-false)
-                   )))
-        (when org-todoist-tz (push `("timezone" . ,org-todoist-tz) res))
+                   ))
+            (is-recurring (org-todoist--task-is-recurring NODE)))
+        ;; (when (and (eq KEYWORD :scheduled) is-recurring)
+        (when is-recurring
+          (push `("is_recurring" . ,t) res)
+          (push `("string" . ,(org-todoist--repeater-to-string dl)) res))
+        ;; (when org-todoist-tz (push `("timezone" . ,org-todoist-tz) res))
         res))))
+
+(defun org-todoist--repeater-to-string (TIMESTAMP)
+  (let ((value (org-element-property :repeater-value TIMESTAMP))
+        (unit (org-element-property :repeater-unit TIMESTAMP)))
+    (when (and value unit)
+      (concat "every " (number-to-string value) " " (symbol-name unit)))))
+
+(defun org-todoist--add-repeater (TIMESTAMP STRING)
+  ;; TODO more repeater cases https://todoist.com/help/articles/introduction-to-recurring-due-dates-YUYVJJAV
+  (let ((match (s-match ".*\\([0-9]*\\) \\([week|day|month|hour]+\\)" STRING)))
+    (when match
+      (org-element-put-property TIMESTAMP :repeater-type (if (s-contains? "!" STRING) 'restart 'cumulate))
+      (org-element-put-property TIMESTAMP :repeater-unit (intern (nth 2 match)))
+      (org-element-put-property TIMESTAMP :repeater-value (if (string= (cadr match) "") 1 (string-to-number (cadr match)))))))
+
+(defun org-todoist--task-is-recurring (TASK)
+  (not (null (org-element-property :repeater-type (org-element-property :scheduled TASK)))))
+
+(defun org-todoist--log-drawer (HL)
+  (org-element-map HL 'drawer (lambda (drawer)
+                                ;; make sure the arg HL is the direct parent headline of the drawer
+                                (when (and (string= (org-element-property :drawer-name drawer) "LOGBOOK")
+                                           (eq (org-element-lineage-map drawer #'identity 'headline nil t) HL))
+                                  drawer))
+                   nil t))
+
+(defun org-todoist--last-recurring-task-completion (TASK)
+  (when (org-todoist--task-is-recurring TASK)
+    (org-timestamp-from-string (org-element-property :LAST_REPEAT TASK))))
+
+(defun org-todoist--last-recurring-task-completion-as-doist (TASK)
+  (org-todoist--date-to-todoist (org-todoist--last-recurring-task-completion TASK)))
+
+(ert-deftest org-todoist--test--task-is-recurring ()
+  (should (org-todoist--task-is-recurring (org-todoist--test-recurring-task))))
 
 (defun org-todoist--push (ast old)
   (let ((commands nil))
@@ -407,7 +446,7 @@ TYPES can be a single symbol or a list of symbols."
                                        ("args" . (("id" . ,id))))
                                      commands)
                              (if is-recurring
-                                 (push `(("uuid" . ,(org-id-uuid))
+                                 (push `(("uuid" . ,(org-id-uuid)) ;; TODO this doesn't work since org auto-reopens with new date. The task will instead be updated with item_update
                                          ("type" . "item_close")
                                          ("args" . (("id" . ,id))))
                                        commands)
@@ -425,7 +464,7 @@ TYPES can be a single symbol or a list of symbols."
                  ;; item_add. No todoist type means new task
                  (unless (org-element-property :TODOIST_TYPE hl)
                    (let ((tid (org-id-uuid)))
-                     (org-todoist--add-prop hl "temp_id" tid) ;; TODO the ast isn't persisted here, so we wind up with a duplicate since the new one isn't associated with the temp id
+                     (org-todoist--add-prop hl "temp_id" tid)
                      (push `(("uuid" . ,(org-id-uuid))
                              ("temp_id" . ,tid)
                              ("type" . "item_add")
@@ -478,6 +517,7 @@ TYPES can be a single symbol or a list of symbols."
     (goto-char (point-min))
     (insert "#+title: Todoist
 #+FILETAGS: :todoist:
+#+STARTUP: logdone
 ")))
 
 (defun org-todoist--project-node (AST)
@@ -635,23 +675,29 @@ body DESCRIPTION, and drawer PROPERTIES, ignoring SKIP, under PARENT."
 
 (defun org-todoist--closed-date (TASK)
   (let ((date (assoc-default 'completed_at TASK)))
-    (org-todoist--get-timestamp2 date)))
+    (org-todoist--get-ts-from-date date)))
 
 (defun org-todoist--scheduled-date (TASK) (org-todoist--get-timestamp 'due TASK))
-
 (defun org-todoist--deadline-date (TASK) (org-todoist--get-timestamp 'deadline TASK))
 
-(defun org-todoist--get-timestamp (SYMBOL TASK)
-  (let ((date (assoc-default 'date (assoc-default SYMBOL TASK))))
-    (org-todoist--get-timestamp2 date)))
-
-(defun org-todoist--get-timestamp2 (date)
+(defun org-todoist--get-ts-from-date (date)
   ;; TODO more efficient utc conversions
-  (when (org-todoist--has-date date)
-    (let ((hastime (not (eql 10 (length date)))));; Todoist date format for tasks without a time is 10 char string
+  (unless (null date)
+    (let ((hastime (not (eql 10 (length date))))) ;; Todoist date format for tasks without a time is 10 char string
       (if (not (string= (substring date (- (length date) 1)) "Z"))
           (org-timestamp-from-time (org-read-date nil t date nil) hastime)
         (org-todoist--timestamp-from-utc-str date hastime)))))
+
+(defun org-todoist--get-timestamp (SYMBOL TASK)
+  (org-todoist--get-timestamp2 (assoc-default SYMBOL TASK)))
+
+(defun org-todoist--get-timestamp2 (DATEOBJ)
+  (when-let* ((date (assoc-default 'date DATEOBJ))
+              (hasdate (org-todoist--has-date date))
+              (ts (org-todoist--get-ts-from-date date)))
+    (when (eq t (assoc-default 'is_recurring DATEOBJ))
+      (org-todoist--add-repeater ts (assoc-default 'string DATEOBJ)))
+    ts))
 
 (defun org-todoist--timestamp-from-utc-str (STRING &optional WITH-TIME)
   "Creates an an org mode timestamp element from STRING, which is an RFC3339
@@ -1237,6 +1283,7 @@ NODE unless they are in plist SKIP. RETURNS the mutated NODE."
 (defun org-todoist--sample-response () (with-file-contents! "/home/aus/projects/org-todoist/api-call.json" (json-read)))
 
 (defun org-todoist--test-task () (org-todoist--get-by-id org-todoist--task-type "3" (org-todoist--generate-sample-ast)))
+(defun org-todoist--test-recurring-task () (org-todoist--get-by-id org-todoist--task-type "3333333" (org-todoist--generate-sample-ast)))
 (defun org-todoist--test-task-section () (org-todoist--get-by-id org-todoist--section-type "555" (org-todoist--generate-sample-ast)))
 (defun org-todoist--test-task-done () (org-todoist--get-by-id org-todoist--task-type "8888" (org-todoist--generate-sample-ast)))
 
