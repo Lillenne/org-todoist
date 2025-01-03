@@ -32,8 +32,9 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [X] Deadline
   - [X] Completed (currently in utc)
   - [X] Priority
-  - [ ] Assignee
+  - [X] Assignee
   - [X] Skip properties to reduce drawer size
+  - [ ] Recurring tasks
 - [-] Implement sync updates
   - [X] Manual sync read updates
   - [ ] Automated sync read updates(?)
@@ -48,34 +49,35 @@ Features are read only (unidirectional sync) unless otherwise noted.
     - [X] Effort
     - [X] Priority
     - [X] Labels
-    - [ ] Assigned to
-    - [ ] Section and project changes
-    - [X] Refile to section
-    - [X] Refile to project
+    - [X] Assigned to
+    - [X] Task refiling
+      - [X] Refile to section
+      - [X] Refile to project
     - [X] New tasks
     - [ ] New sections
     - [ ] New projects
+    - [ ] Refile section to new project
     - [-] Deletions
       - [ ] Sections
       - [ ] Projects
-      - [X] Tasks
+      - [X] Tasks (pull from remote)
+      - [X] Tasks (local)
 - [-] Add non-essential task items
   - [X] Datetime for scheduled / deadline (time of day)
   - [X] Effort/Duration
+  - [ ] Better assignee filtering in agenda
   - [ ] Comments
     - [ ] Text-only sync
-    - [ ] notify on comment with @tag(?)
+    - [ ] notify other user(s) on comment
   - [ ] Subtask support
   - [ ] Subproject support
 - [ ] Essential project packaging
   - [ ] Provide functions in package el file
   - [ ] Remove dev local hardcoded paths
 - [ ] Implement low priority task items
-  - [ ] Recurring tasks
   - [ ] Markdown description support
-- [ ] Bugs
-  - [ ] Completed time sometimes in UTC
 * Not currently planning to implement
 - File attachments
+- Filters (use org agenda for this)
 * Author's notes
 This is my first major elisp project, so I am almost certainly missing some best practices and useful tools. If you have any knowledge to share or want to contribute, please reach out, create an issue, or open a PR!

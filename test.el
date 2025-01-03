@@ -99,6 +99,25 @@
     (thing-at-point 'line t)))
 
                                         ;API Requests;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun org-todoist-unassign-task ()
+  (interactive)
+  (org-set-property "responsible_uid" "nil"))
+
+(defun org-todoist-assign-task ()
+  (interactive)
+  ;; TODO limit to just tasks, but allow assigning for tasks that haven't been added to Todoist yet
+  (let* ((ast (org-todoist--file-ast))) ;; TODO cache?
+    (if-let* ((userelements (org-element-map (org-todoist--user-node ast) 'headline
+                              (lambda (node) (when (org-todoist--node-type-query node org-todoist--collaborator-type) node))))
+              (usernames (--map (org-element-property :raw-value it) userelements))
+              (selected (completing-read "Assign to: " (append usernames "Unassign")))
+              (selectedelement (--first (string= (org-element-property :raw-value it) selected) userelements))
+              (rid (org-element-property :ID selectedelement)))
+        (org-set-property "responsible_uid" rid))))
+
+(defun org-todoist--all-users ()
+  (org-element-map (org-todoist--user-node (org-todoist--file-ast)) 'headline #'identity))
+
 (defun org-todoist-sync (&optional ARG)
   (interactive "P")
   (org-todoist--do-sync (org-todoist--get-sync-token) (null ARG)))
@@ -279,6 +298,7 @@ TYPES can be a single symbol or a list of symbols."
                (id (org-todoist--get-prop hl "ID"))
                (oldtask (org-todoist--get-by-id org-todoist--task-type id old))
                (todo-type (org-element-property :todo-type hl))
+               (todo-kw (org-element-property :todo-keyword hl))
                (title (org-element-property :raw-value hl))
                (desc (org-todoist--description-text hl))
                (sch (org-element-property :scheduled hl))
@@ -290,6 +310,8 @@ TYPES can be a single symbol or a list of symbols."
                (proj (org-todoist--get-project-id-position hl))
                (section (org-todoist--get-section-id-position hl))
                (parenttask (org-todoist--get-task-id-position hl))
+               (rid (org-element-property :RESPONSIBLE_UID hl))
+               (is-recurring (org-todoist--task-is-recurring hl))
                )
           (cond ((string-equal type org-todoist--task-type)
                  (when oldtask
@@ -297,6 +319,8 @@ TYPES can be a single symbol or a list of symbols."
                           (oldsection (org-todoist--get-section-id-position oldtask))
                           (oldparenttask (org-todoist--get-task-id-position oldtask))
                           (oldproj (org-todoist--get-project-id-position oldtask))
+                          (old-todo-type (org-element-property :todo-type oldtask))
+                          (old-todo-kw (org-element-property :todo-keyword oldtask))
                           (oldtitle (org-element-property :raw-value oldtask))
                           (olddesc (org-todoist--description-text oldtask))
                           (oldpri (org-element-property :priority oldtask))
@@ -305,7 +329,7 @@ TYPES can be a single symbol or a list of symbols."
                           (oldeffstr (org-todoist--get-prop oldtask "EFFORT"))
                           (oldeff (when oldeffstr (org-duration-to-minutes oldeffstr)))
                           (oldlabels (org-element-property :tags oldtask))
-                          ;; assigned to
+                          (oldrid (org-element-property :RESPONSIBLE_UID oldtask))
                           )
 
                      ;; item_move. Only one parameter can be specified
@@ -356,7 +380,7 @@ TYPES can be a single symbol or a list of symbols."
                             (not (equal eff oldeff))
                             (not (equal pri oldpri))
                             (not (equal labels oldlabels))
-                            ;; TODO assigned to
+                            (not (equal rid oldrid))
                             )
                        (let (
                              (req `(("type" . "item_update")
@@ -369,20 +393,30 @@ TYPES can be a single symbol or a list of symbols."
                                                ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
                                                ("priority" . ,(org-todoist--get-priority hl))
                                                ("labels" . ,labels)
-                                               ;; ("responsible_uid" . ,nil) ;;TODO
+                                               ("responsible_uid" . ,rid)
                                                )))))
                          (push req commands)))
 
                      ;; todo-state changed
-                     (when (not (equal (org-element-property :todo-type oldtask)
-                                       (org-element-property :todo-type hl)))
+                     ;; TODO recurring task support
+                     (when (not (equal todo-type old-todo-type))
                        (if (eq 'done todo-type)
-                           (push `(("uuid" . ,(org-id-uuid))
-                                   ("type" . "item_complete")
-                                   ("args" . (("id" . ,id)
-                                              ("date_completed" .
-                                               ,(org-todoist--timestamp-to-utc-str (org-element-property :closed hl))))))
-                                 commands)
+                           (if (string= org-todoist-deleted-keyword todo-kw)
+                               (push `(("uuid" . ,(org-id-uuid))
+                                       ("type" . "item_delete")
+                                       ("args" . (("id" . ,id))))
+                                     commands)
+                             (if is-recurring
+                                 (push `(("uuid" . ,(org-id-uuid))
+                                         ("type" . "item_close")
+                                         ("args" . (("id" . ,id))))
+                                       commands)
+                               (push `(("uuid" . ,(org-id-uuid))
+                                       ("type" . "item_complete")
+                                       ("args" . (("id" . ,id)
+                                                  ("date_completed" .
+                                                   ,(org-todoist--timestamp-to-utc-str (org-element-property :closed hl))))))
+                                     commands)))
                          (push `(("uuid" . ,(org-id-uuid))
                                  ("type" . "item_uncomplete")
                                  ("args" . (("id" . ,id))))
@@ -406,7 +440,7 @@ TYPES can be a single symbol or a list of symbols."
                                         ("parent_id" . ,(org-todoist--get-task-id-position hl))
                                         ("section_id" . ,(org-todoist--get-section-id-position hl))
                                         ("project_id" . ,(org-todoist--get-project-id-position hl))
-                                        ;; ("responsible_uid" . ,nil) ;;TODO
+                                        ("responsible_uid" . ,rid)
                                         )))
                            commands))))))))
     commands))
@@ -577,9 +611,6 @@ body DESCRIPTION, and drawer PROPERTIES, ignoring SKIP, under PARENT."
         (org-todoist--replace-description updated DESCRIPTION)
         updated)
     (org-todoist--create-node TYPE TEXT DESCRIPTION PROPERTIES PARENT SKIP)))
-
-;; TODO method for syncing local changes. E.G assignee
-(defun org-todoist-assign () (org-todoist--unimplemented))
 
 (defun vector-to-list (vector)
   "Convert a VECTOR into a regular Lisp list using cl-loop."
@@ -927,9 +958,9 @@ DEFAULT text."
 
                                         ;Find node;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--find-node (QUERY AST)
-  "Return the first node in the syntax tree AST which matches QUERY.
+  "Return the first headling in the syntax tree AST which matches QUERY.
 QUERY takes a single argument which is the current node."
-  (org-element-map AST t (lambda (node) (when (funcall QUERY node) node)) nil t))
+  (org-element-map AST 'headline (lambda (node) (when (funcall QUERY node) node)) nil t))
 
 (defun org-todoist--get-by-id (TYPE ID AST)
   "Finds the first item of TODOIST_TYPE TYPE with id ID in the syntax tree AST."

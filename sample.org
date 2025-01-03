@@ -32,12 +32,24 @@ DEADLINE: <2025-01-01 Wed 00:01> SCHEDULED: <2024-12-31 Tue 23:59>
 :id:       3
 :END:
 :LOGBOOK:
+- State "DONE"       from "TODO"       [2024-10-28 Mon 15:45]
 - Rescheduled from "[2024-12-30 Mon 23:00]" on [2025-01-01 Wed 13:39]
 - Rescheduled from "[2024-12-29 Sun 23:00]" on [2025-01-01 Wed 13:36]
 :END:
 Description
 
 More description
+**** TODO Recurring task
+SCHEDULED: <2025-01-11 Sat ++1w>
+:PROPERTIES:
+:TODOIST_TYPE: TASK
+:child_order: 10
+:id:       3333333
+:LAST_REPEAT: [2025-01-02 Thu 23:10]
+:END:
+:LOGBOOK:
+- State "DONE"       from "TODO"       [2025-01-02 Thu 23:10]
+:END:
 *** Unsectioned
 **** Unsectioned Task 1 [1/2]
 :PROPERTIES:
