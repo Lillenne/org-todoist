@@ -46,7 +46,17 @@ Features are read only (unidirectional sync) unless otherwise noted.
     - [X] Deadline
     - [X] Completed
     - [X] Description
-    - [ ] Comments
+    - [-] Comments
+      - [-] Item comments
+        - [X] Add
+        - [ ] Update
+        - [ ] Delete
+        - [ ] Notify other users
+      - [ ] Project comments
+        - [ ] Add
+        - [ ] Update
+        - [ ] Delete
+        - [ ] Notify other users
     - [X] Effort
     - [X] Priority
     - [X] Labels
@@ -67,9 +77,6 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [X] Datetime for scheduled / deadline (time of day)
   - [X] Effort/Duration
   - [ ] Better assignee filtering in agenda
-  - [ ] Comments
-    - [ ] Text-only sync
-    - [ ] notify other user(s) on comment
   - [ ] Subtask support
   - [ ] Subproject support
 - [ ] Essential project packaging

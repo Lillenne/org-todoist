@@ -36,6 +36,7 @@
 (defvar org-todoist-user-headline "Collaborators")
 (defvar org-todoist-project-headline "Projects")
 (defvar org-todoist-tz nil)
+(defvar org-todoist-lang "en")
 (defvar org-todoist-use-auto-reminder t)
 (defvar org-todoist-show-n-levels 4
   "The number of headline levels to show.
@@ -90,13 +91,45 @@
 
 (defun org-todoist--set-last-sync-buffer (AST) (with-file! (org-todoist--storage-file org-todoist--sync-buffer-file) (org-mode) (insert (org-todoist-org-element-to-string AST))))
 (defun org-todoist--get-last-sync-buffer-ast ()
-  (when (file-exists-p (org-todoist--storage-file org-todoist--sync-buffer-file))
-    (with-file-contents! (org-todoist--storage-file org-todoist--sync-buffer-file) (org-mode) (org-element-parse-buffer))))
+  (let* ((fn (org-todoist--storage-file org-todoist--sync-buffer-file))
+         (existed (file-exists-p fn))
+         (buf (find-file-noselect fn))) ;; create buffer. Will be used later in chain
+    (when existed
+      (save-window-excursion (find-file fn)
+                             ;; (with-current-buffer buf ;;not sure why this doesn't work
+                             (org-mode)
+                             (org-element-parse-buffer)))))
 
 (defun get-last-line ()
   (save-excursion
     (goto-char (point-max))
     (thing-at-point 'line t)))
+
+(defun org-todoist--get-comments (HEADLINE)
+  (org-element-map HEADLINE 'item (lambda (item) (when (org-todoist--is-note item) item))))
+
+(defun org-todoist--is-note (ITEM)
+  "NOTE must be on the org buffer"
+  (s-contains? "Note" (org-todoist--item-text ITEM)))
+
+(defun org-todoist--item-text (ITEM)
+  ;; May want to always user org-element-to-string since it doesn't require the buffer. Don't remember about including / excluding bullets
+  (if (and (org-element-contents-begin ITEM) (org-element-contents-end ITEM))
+      (buffer-substring-no-properties (org-element-contents-begin ITEM) (org-element-contents-end ITEM))
+    (org-todoist-org-element-to-string ITEM)))
+
+(defun org-todoist--note-text (ITEM)
+  "NOTE must be on the org buffer"
+  (let ((text (org-todoist--item-text ITEM)))
+    (when (s-contains? "Note taken on [" text) (s-trim-right (s-join "\n" (--map (s-trim it) (cdr (s-lines text))))))))
+
+;; (defun org-todoist--get-comments-text (HEADLINE)
+(defun org-todoist--get-comments-text (HEADLINE &optional FILE)
+  "NOTE must be on the org buffer or specify buffer as FILE"
+  (if FILE
+      ;; (with-current-buffer (find-file-noselect FILE) (--map (org-todoist--note-text it) (org-todoist--get-comments HEADLINE))) ;; TODO why does this not work
+      (save-window-excursion (find-file FILE) (--map (org-todoist--note-text it) (org-todoist--get-comments HEADLINE)))
+    (--map (org-todoist--note-text it) (org-todoist--get-comments HEADLINE))))
 
                                         ;API Requests;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist-unassign-task ()
@@ -317,6 +350,22 @@ TYPES can be a single symbol or a list of symbols."
                                   drawer))
                    nil t))
 
+(defun org-todoist--log-drawer-add-note (HL TEXT DATE)
+  (let ((drawer (org-todoist--log-drawer HL))
+        (note (org-element-create 'item '(:bullet "-" :pre-blank 0)
+                                  (org-element-create 'plain-text nil (concat "Note taken on "
+                                                                              (org-todoist-org-element-to-string (org-todoist--get-ts-from-date DATE t))
+                                                                              ;; (org-todoist-org-element-to-string (org-timestamp-from-time (current-time) t t))
+                                                                              " \\\\\n"
+                                                                              TEXT)))))
+    (if (null drawer)
+        (org-element-adopt HL (org-element-create 'drawer '(:drawer-name "LOGBOOK") note))
+      (let ((children (org-element-contents drawer)))
+        (if children
+            (org-element-insert-before note (car children))
+          (org-element-adopt drawer note)))))
+  HL)
+
 (defun org-todoist--last-recurring-task-completion (TASK)
   (when (org-todoist--task-is-recurring TASK)
     (org-timestamp-from-string (org-element-property :LAST_REPEAT TASK))))
@@ -327,8 +376,13 @@ TYPES can be a single symbol or a list of symbols."
 (ert-deftest org-todoist--test--task-is-recurring ()
   (should (org-todoist--task-is-recurring (org-todoist--test-recurring-task))))
 
+(defun org-todoist--push-test ()
+  (org-todoist--push (org-todoist--file-ast) (org-todoist--get-last-sync-buffer-ast)))
+
 (defun org-todoist--push (ast old)
-  (let ((commands nil))
+  (let ((commands nil)
+        (curfile (org-todoist-file))
+        (oldfile (org-todoist--storage-file org-todoist--sync-buffer-file)))
     ;; TODO map old and new so we can see anything deleted?
     (org-element-map ast 'headline
       (lambda (hl)
@@ -351,6 +405,7 @@ TYPES can be a single symbol or a list of symbols."
                (parenttask (org-todoist--get-task-id-position hl))
                (rid (org-element-property :RESPONSIBLE_UID hl))
                (is-recurring (org-todoist--task-is-recurring hl))
+               (comments (org-todoist--get-comments-text hl curfile))
                )
           (cond ((string-equal type org-todoist--task-type)
                  (when oldtask
@@ -369,7 +424,17 @@ TYPES can be a single symbol or a list of symbols."
                           (oldeff (when oldeffstr (org-duration-to-minutes oldeffstr)))
                           (oldlabels (org-element-property :tags oldtask))
                           (oldrid (org-element-property :RESPONSIBLE_UID oldtask))
+                          (oldcomments (org-todoist--get-comments-text oldtask oldfile))
                           )
+                     (unless (equal comments oldcomments)
+                       ;; TODO support comment editing. This will push any edited comments as new comments
+                       (dolist (comment (--filter (not (member it oldcomments)) comments))
+                         (push `(("uuid" . ,(org-id-uuid))
+                                 ("type" . "note_add")
+                                 ("temp_id". ,(org-id-uuid))
+                                 ("args" . (("item_id" . ,id)
+                                            ("content" . ,comment))))
+                               commands)))
 
                      ;; item_move. Only one parameter can be specified
                      (unless (and (string= section oldsection)
@@ -494,15 +559,28 @@ TYPES can be a single symbol or a list of symbols."
         (projects (assoc-default 'projects RESPONSE))
         (collab (assoc-default 'collaborators RESPONSE))
         (sections (assoc-default 'sections RESPONSE))
+        (comments (assoc-default 'notes RESPONSE))
         (token (assoc-default 'sync_token RESPONSE))
         (tid_mapping (assoc-default 'temp_id_mapping RESPONSE)))
     (org-todoist--update-users collab AST)
     (org-todoist--update-projects projects AST)
     (org-todoist--update-sections sections AST)
     (org-todoist--update-tasks tasks AST tid_mapping OLDAST)
+    (org-todoist--update-comments comments AST (org-todoist-file))
     (org-todoist--set-sync-token token)
     (org-todoist--set-last-sync-buffer AST)
     (org-todoist--update-file AST)))
+
+(defun org-todoist--update-comments (COMMENTS AST FILE)
+  (cl-loop for comment across COMMENTS do
+           ;; TODO support comment IDs and add/update/delete
+           (let* ((task (org-todoist--get-by-id org-todoist--task-type (assoc-default 'item_id comment) AST))
+                  (comments (org-todoist--get-comments-text task FILE))
+                  (text (assoc-default 'content comment)))
+             (unless (member text comments)
+               (org-todoist--log-drawer-add-note task (assoc-default 'content comment) (assoc-default 'posted_at comment)))
+             ;; TODO sort comments by time.
+             )))
 
 (ert-deftest org-todoist--test--parse-response ()
   (with-file-contents! "/home/aus/projects/org-todoist/api-call.json"
@@ -518,6 +596,7 @@ TYPES can be a single symbol or a list of symbols."
     (insert "#+title: Todoist
 #+FILETAGS: :todoist:
 #+STARTUP: logdone
+#+STARTUP: logdrawer
 ")))
 
 (defun org-todoist--project-node (AST)
@@ -680,13 +759,13 @@ body DESCRIPTION, and drawer PROPERTIES, ignoring SKIP, under PARENT."
 (defun org-todoist--scheduled-date (TASK) (org-todoist--get-timestamp 'due TASK))
 (defun org-todoist--deadline-date (TASK) (org-todoist--get-timestamp 'deadline TASK))
 
-(defun org-todoist--get-ts-from-date (date)
+(defun org-todoist--get-ts-from-date (date &optional inactive)
   ;; TODO more efficient utc conversions
   (unless (null date)
     (let ((hastime (not (eql 10 (length date))))) ;; Todoist date format for tasks without a time is 10 char string
       (if (not (string= (substring date (- (length date) 1)) "Z"))
-          (org-timestamp-from-time (org-read-date nil t date nil) hastime)
-        (org-todoist--timestamp-from-utc-str date hastime)))))
+          (org-timestamp-from-time (org-read-date nil t date nil) hastime inactive)
+        (org-todoist--timestamp-from-utc-str date hastime inactive)))))
 
 (defun org-todoist--get-timestamp (SYMBOL TASK)
   (org-todoist--get-timestamp2 (assoc-default SYMBOL TASK)))
@@ -699,15 +778,15 @@ body DESCRIPTION, and drawer PROPERTIES, ignoring SKIP, under PARENT."
       (org-todoist--add-repeater ts (assoc-default 'string DATEOBJ)))
     ts))
 
-(defun org-todoist--timestamp-from-utc-str (STRING &optional WITH-TIME)
+(defun org-todoist--timestamp-from-utc-str (STRING &optional WITH-TIME INACTIVE)
   "Creates an an org mode timestamp element from STRING, which is an RFC3339
 datetime string. With arg WITH-TIME include the time-of-day portion in the
 timestamp"
-  (org-timestamp-from-string (concat "<"
+  (org-timestamp-from-string (concat (if INACTIVE "[" "<")
                                      (ts-format
                                       (if WITH-TIME "%Y-%m-%d %a %H:%M" "Y-%m-%d %a")
                                       (ts-adjust 'second (car (current-time-zone)) (ts-parse-org-element (org-timestamp-from-time (org-read-date nil t STRING nil) WITH-TIME))))
-                                     ">")))
+                                     (if INACTIVE "]" ">"))))
 
 (defun org-todoist--timestamp-to-utc-str (TIMESTAMP)
   "Converts org timestamp element to utc RFC3339 string"
@@ -756,7 +835,6 @@ DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
                                                    ;; search in project, since the section search will match the default section if there is no section
                                                    (org-todoist--get-by-id org-todoist--project-type (assoc-default 'project_id data) AST)))
                   (tags (assoc-default 'labels data))
-                  (assignee (assoc-default 'responsible_uid data)) ;; TODO
                   )
              ;; check if we need to move sections
              (unless (cl-equalp (org-todoist--get-section-id-position task) (assoc-default 'section_id data))
