@@ -34,10 +34,11 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [X] Priority
   - [X] Assignee
   - [X] Skip properties to reduce drawer size
-  - [-] Recurring tasks (has basic support, missing many natural language recurring due dates)
+  - [-] Recurring tasks (has basic support, missing many natural language recurring due dates & only updates with item_update and not item_close)
+  - [ ] Subtask support*
+  - [ ] Quick add*
 - [-] Implement sync updates
   - [X] Manual sync read updates
-  - [ ] Quick add
   - [ ] Automated sync read updates(?)
   - [-] Push updates
     - [X] TODO state
@@ -49,9 +50,10 @@ Features are read only (unidirectional sync) unless otherwise noted.
     - [-] Comments
       - [-] Item comments
         - [X] Add
+        - [ ] Sort by time added
         - [ ] Update
         - [ ] Delete
-        - [ ] Notify other users
+        - [ ] Notify other users*
       - [ ] Project comments
         - [ ] Add
         - [ ] Update
@@ -65,20 +67,20 @@ Features are read only (unidirectional sync) unless otherwise noted.
       - [X] Refile to section
       - [X] Refile to project
     - [X] New tasks
-    - [ ] New sections
-    - [ ] New projects
-    - [ ] Refile section to new project
+    - [ ] New sections*
+    - [ ] New projects*
+    - [ ] Refile section to new project*
     - [-] Deletions
-      - [ ] Sections
-      - [ ] Projects
+      - [ ] Sections*
+      - [ ] Projects*
       - [X] Tasks (pull from remote)
       - [X] Tasks (local)
 - [-] Add non-essential task items
   - [X] Datetime for scheduled / deadline (time of day)
   - [X] Effort/Duration
   - [ ] Better assignee filtering in agenda
-  - [ ] Subtask support
   - [ ] Subproject support
+- [ ] Support org linking by id (rename current id property?)
 - [ ] Essential project packaging
   - [ ] Provide functions in package el file
   - [ ] Remove dev local hardcoded paths

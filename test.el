@@ -39,7 +39,9 @@
 (defvar org-todoist-lang "en")
 (defvar org-todoist-use-auto-reminder t)
 (defvar org-todoist-show-n-levels 4
-  "The number of headline levels to show.
+  "The number of headline levels to show by default.
+If visiting the todoist buffer when sync is called, it will instead
+show the outline up to one level above the current position.
 2=projects,
 3=sections,
 4=root tasks,
@@ -73,6 +75,7 @@
 (defconst org-todoist--sync-token-file "SYNC-TOKEN")
 (defconst org-todoist--sync-buffer-file "SYNC-BUFFER")
 
+(add-to-list 'org-fold-show-context-detail '(todoist . lineage))
 
                                         ;Data;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defvar org-todoist--storage-dir (concat (file-name-as-directory (xdg-cache-home))  "org-todoist") "Directory for org-todoist storage.")
@@ -214,7 +217,11 @@
   (when (or (null org-todoist-api-token) (not (stringp org-todoist-api-token)))
     (error "No org-todoist-api-token API token set"))
   (setq org-todoist--sync-err nil)
-  (let* ((url-request-method org-todoist-http-method)
+  (let* ((cur-headline (if (equal (buffer-name (current-buffer)) org-todoist-file)
+                           (org-entry-get (point) "ITEM")
+                         nil))
+         (show-n-levels (when cur-headline (org-todoist--get-hl-level-at-point)))
+         (url-request-method org-todoist-http-method)
          (url-request-extra-headers `(("Authorization" . ,(concat "Bearer " org-todoist-api-token))
                                       ("Content-Type" . ,org-todoist-request-type)))
          (ast (org-todoist--file-ast))
@@ -226,7 +233,7 @@
     (setq org-todoist--last-req url-request-data)
     (message (if OPEN "Syncing with todoist. Buffer will open when sync is complete..." "Syncing with todoist. This may take a moment..."))
     (url-retrieve org-todoist-sync-endpoint
-                  (lambda (events open ast old)
+                  (lambda (events open ast old cur-headline show-n-levels)
                     (if (plist-member events :error)
                         (progn (setq org-todoist--sync-err events)
                                (message "Sync failed. See org-todoist--sync-err for details."))
@@ -236,23 +243,31 @@
                         (org-todoist--set-last-response resp) ;; TODO remove
                         (setq org-todoist--last-response (json-read-from-string resp))
                         (org-todoist--parse-response org-todoist--last-response ast old)
-                        (when (get-buffer "todoist.org") ;; todoist buffer is open
+                        (if open
+                            (org-todoist--handle-display cur-headline show-n-levels)
                           (save-window-excursion
-                            (find-file (org-todoist-file))
-                            (if (< org-todoist-show-n-levels 1)
-                                (org-content)
-                              (org-content org-todoist-show-n-levels))
-                            (org-fold-hide-drawer-all)))
-                        (when open ;; told to open the buffer
-                          (find-file (org-todoist-file))
-                          ;; (save-buffer)
-                          (if (< org-todoist-show-n-levels 1)
-                              (org-content)
-                            (org-content org-todoist-show-n-levels)))
+                            (org-todoist--handle-display cur-headline show-n-levels)))
                         (message "Sync complete."))))
-                  `(,OPEN ,ast ,old)
+                  `(,OPEN ,ast ,old ,cur-headline ,show-n-levels)
                   'silent
                   'inhibit-cookies)))
+
+(defun org-todoist--handle-display (cur-headline show-n-levels)
+  (unless show-n-levels (setq show-n-levels org-todoist-show-n-levels))
+  (find-file (org-todoist-file))
+  (save-buffer)
+  (if (< show-n-levels 1)
+      (org-content)
+    (org-content show-n-levels))
+  (org-fold-hide-drawer-all)
+  (when cur-headline
+    (let ((pos nil))
+      (org-map-entries (lambda () (when (equal (org-entry-get nil "ITEM") cur-headline)
+                                    (setq pos (point)))))
+      (goto-char pos)
+      (org-fold-show-context 'todoist)
+      ;; (+org/open-fold)
+      )))
 
 (defun org-todoist--first-parent-of-type (NODE TYPES)
   "Gets the first parent which is one of the given TYPES.
@@ -321,7 +336,7 @@ TYPES can be a single symbol or a list of symbols."
         ;; (when (and (eq KEYWORD :scheduled) is-recurring)
         (when is-recurring
           (push `("is_recurring" . ,t) res)
-          (push `("string" . ,(org-todoist--repeater-to-string dl)) res))
+          (push `("string" . ,(org-todoist--repeater-to-string (org-element-property KEYWORD NODE))) res))
         ;; (when org-todoist-tz (push `("timezone" . ,org-todoist-tz) res))
         res))))
 
@@ -379,6 +394,13 @@ TYPES can be a single symbol or a list of symbols."
 (defun org-todoist--push-test ()
   (org-todoist--push (org-todoist--file-ast) (org-todoist--get-last-sync-buffer-ast)))
 
+(defun org-todoist--timestamp-times-equal (T1 T2)
+  (and (equal (org-element-property :year-start T1) (org-element-property :year-start T2))
+       (equal (org-element-property :month-start T1) (org-element-property :month-start T2))
+       (equal (org-element-property :day-start T1) (org-element-property :day-start T2))
+       (equal (org-element-property :hour-start T1) (org-element-property :hour-start T2))
+       (equal (org-element-property :minute-start T1) (org-element-property :minute-start T2))))
+
 (defun org-todoist--push (ast old)
   (let ((commands nil)
         (curfile (org-todoist-file))
@@ -389,7 +411,7 @@ TYPES can be a single symbol or a list of symbols."
         ;; TODO would be easier as oop, need to learn lisp oop
         (let* ((type (org-todoist--get-todoist-type hl))
                (id (org-todoist--get-prop hl "ID"))
-               (oldtask (org-todoist--get-by-id org-todoist--task-type id old))
+               (oldtask (org-todoist--get-by-id nil id old))
                (todo-type (org-element-property :todo-type hl))
                (todo-kw (org-element-property :todo-keyword hl))
                (title (org-element-property :raw-value hl))
@@ -406,6 +428,8 @@ TYPES can be a single symbol or a list of symbols."
                (rid (org-element-property :RESPONSIBLE_UID hl))
                (is-recurring (org-todoist--task-is-recurring hl))
                (comments (org-todoist--get-comments-text hl curfile))
+               (lr (org-element-property :LAST_REPEAT hl))
+               (last-repeat (when (and lr is-recurring) (org-timestamp-from-string lr)))
                )
           (cond ((string-equal type org-todoist--task-type)
                  (when oldtask
@@ -486,8 +510,14 @@ TYPES can be a single symbol or a list of symbols."
                             (not (equal labels oldlabels))
                             (not (equal rid oldrid))
                             )
-                       (let (
-                             (req `(("type" . "item_update")
+                       ;; TODO HERE compare last repeat to old scheduled date. If same, we completed a recurring task and need to call item close
+                       ;; Doesn't work - last repeat logs when it was closed not the due date. Functionally the same except it doesn't log the completion on the todoist side, I think
+                       (when (org-todoist--timestamp-times-equal last-repeat oldsch) ;; completed recurring task
+                         (push `(("uuid" . ,(org-id-uuid))
+                                 ("type" . "item_close")
+                                 ("args" . (("id" . ,id))))
+                               commands))
+                       (let ((req `(("type" . "item_update")
                                     ("uuid" . ,(org-id-uuid))
                                     ("args" . (("id" . ,id)
                                                ("content" . ,title)
@@ -497,8 +527,7 @@ TYPES can be a single symbol or a list of symbols."
                                                ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
                                                ("priority" . ,(org-todoist--get-priority hl))
                                                ("labels" . ,labels)
-                                               ("responsible_uid" . ,rid)
-                                               )))))
+                                               ("responsible_uid" . ,rid))))))
                          (push req commands)))
 
                      ;; todo-state changed
@@ -549,8 +578,29 @@ TYPES can be a single symbol or a list of symbols."
                            commands))))))))
     commands))
 
+(defun org-todoist--is-project (NODE)
+  (string= (org-todoist--infer-type NODE) org-todoist--project-type))
+
+(defun org-todoist--is-section (NODE)
+  (string= (org-todoist--infer-type NODE) org-todoist--section-type))
+
+(defun org-todoist--infer-type (NODE)
+  (if-let ((type (org-todoist--get-todoist-type NODE)))
+      type ;; already has type labeled
+    (if-let ((parenttype (org-todoist--get-todoist-type (org-element-parent NODE))))
+        (cond ((string= parenttype org-todoist--task-type) org-todoist--task-type)
+              ((string= parenttype org-todoist--section-type) org-todoist--task-type)
+              ((string= parenttype org-todoist--project-type)
+               (if (org-element-map NODE 'headline
+                     (lambda (child) (when (string= (org-todoist--get-todoist-type child) org-todoist--section-type) t))
+                     nil t)
+                   org-todoist--project-type ;; has section children -> is project
+                 org-todoist--section-type)) ;; otherwise it is probably a new section. Could be wrong.
+              (t org-todoist--project-type)))))
+
 (defun org-todoist--is-task (NODE)
-  (org-element-lineage-map NODE (lambda (parent) (string= org-todoist--section-type (org-todoist--get-todoist-type parent))) 'headline nil t))
+  (string= (org-todoist--infer-type NODE) org-todoist--task-type))
+;; (org-element-lineage-map NODE (lambda (parent) (string= org-todoist--section-type (org-todoist--get-todoist-type parent))) 'headline nil t))
 ;; (or (org-element-property :TODOIST_TYPE NODE) ;; causes issues when refiling
 ;;     (org-element-lineage-map NODE (lambda (parent) (string= org-todoist--section-type (org-todoist--get-todoist-type parent))) 'headline nil t)))
 
@@ -1088,7 +1138,7 @@ QUERY takes a single argument which is the current node."
 
 (defun org-todoist--get-by-id (TYPE ID AST)
   "Finds the first item of TODOIST_TYPE TYPE with id ID in the syntax tree AST."
-  (org-element-map AST 'headline (lambda (hl) (when (and (string-equal (org-todoist--get-prop hl org-todoist--type) TYPE)
+  (org-element-map AST 'headline (lambda (hl) (when (and (or (null TYPE) (string-equal (org-todoist--get-prop hl org-todoist--type) TYPE))
                                                          (string-equal (org-todoist--get-prop hl "id") ID))
                                                 hl))
                    nil t))
@@ -1122,7 +1172,18 @@ and the TID_MAPPING. Add PROPS not including SKIP to found node."
 matching parent."
   (org-element-lineage-map NODE
       (lambda (parent) (when (equal (org-todoist--get-todoist-type parent) TYPE)
-                         parent)) 'headline nil FIRST))
+                         parent))
+    'headline nil FIRST))
+
+(defun org-todoist--get-parent-of-element-type (TYPE NODE)
+  "Gets the parent(s) of NODE with org-element-type TYPE."
+  (org-element-lineage-map NODE
+      (lambda (parent) (when (and (not (eq NODE parent))) (eq (org-element-type NODE) TYPE)
+                             parent))
+    'headline nil t))
+
+(defun org-todoist--get-hl-level-at-point ()
+  (org-element-property :level (org-todoist--get-parent-of-element-type 'headline (org-element-at-point))))
 
 (ert-deftest org-todoist--test--get-parent ()
   "Tests getting the parent node of a specific type"
