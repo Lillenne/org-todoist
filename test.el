@@ -32,12 +32,13 @@
       org-priority-lowest ?D)
 (defvar url-http-end-of-headers nil)
 (defvar org-todoist-api-token nil "The API token to use to sync with Todoist")
-(defvar org-todoist-file "todoist.org")
-(defvar org-todoist-user-headline "Collaborators")
-(defvar org-todoist-project-headline "Projects")
-(defvar org-todoist-tz nil)
+(defvar org-todoist-file "todoist.org" "The name of the todoist org file. If relative, it is taken as relative to the org directory.")
+(defvar org-todoist-user-headline "Collaborators" "The name of the root collaborators metadata node")
+(defvar org-todoist-project-headline "Projects" "The name of the project root node.")
+(defvar org-todoist-tz nil "The timezone to use when converting from Todoist time (UTC). Currently this is ignored in favor of current-time.")
 (defvar org-todoist-lang "en")
 (defvar org-todoist-use-auto-reminder t)
+(defvar org-todoist-sync-interval 60 "The interval in seconds between sync requests with Todoist servers. Polling not yet implemented.")
 (defvar org-todoist-show-n-levels 4
   "The number of headline levels to show by default.
 If visiting the todoist buffer when sync is called, it will instead
@@ -46,9 +47,9 @@ show the outline up to one level above the current position.
 3=sections,
 4=root tasks,
 <0 no fold")
-(defvar org-todoist-todo-keyword "TODO")
-(defvar org-todoist-done-keyword "DONE")
-(defvar org-todoist-deleted-keyword "CANCELED")
+(defvar org-todoist-todo-keyword "TODO" "TODO keyword for active Todoist tasks")
+(defvar org-todoist-done-keyword "DONE" "TODO keyword for completed Todoist tasks")
+(defvar org-todoist-deleted-keyword "CANCELED" "TODO keyword for deleted Todoist tasks")
 (defun org-todoist--expand-from-dir (dir file)
   (if (file-name-absolute-p file)
       file
@@ -57,32 +58,41 @@ show the outline up to one level above the current position.
 
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators") "The list of resource types to sync")
-(defconst org-todoist-sync-endpoint "https://api.todoist.com/sync/v9/sync")
-(defconst org-todoist-request-type "application/x-www-form-urlencoded; charset=utf-8")
-(defconst org-todoist-http-method "POST")
-(defconst org-todoist--type "TODOIST_TYPE")
-(defconst org-todoist--collaborator-type "USER")
-(defconst org-todoist--section-type "SECTION")
-(defconst org-todoist--project-type "PROJECT")
-(defconst org-todoist--task-type "TASK")
-(defconst org-todoist--user-node-type "USER_HEADLINE")
-(defconst org-todoist--project-node-type "PROJECT_HEADLINE")
-(defconst org-todoist--sync-areas ["collaborators", "projects", "items", "sections"])
-(defconst org-todoist--project-skip-list '(name can_assign_tasks collapsed color is_archived is_deleted is_favorite is_frozen sync_id v2_id v2_parent_id view_style))
-(defconst org-todoist--section-skip-list '(name project_id sync_id updated_at v2_id v2_project_id is_deleted is_archived collapsed archived_at section_order))
-(defconst org-todoist--task-skip-list '(name completed_at content collapsed duration description checked deadline due labels priority sync_id v2_id v2_parent_id v2_project_id v2_section_id completed_at content day_order is_deleted))
-;; (defconst org-todoist--task-skip-list '(name completed_at content collapsed duration description checked deadline due labels priority project_id section_id sync_id v2_id v2_parent_id v2_project_id v2_section_id completed_at content day_order is_deleted))
+(defconst org-todoist-sync-endpoint "https://api.todoist.com/sync/v9/sync" "The todoist sync endpoint.")
+(defconst org-todoist-request-type "application/x-www-form-urlencoded; charset=utf-8" "The request type for Todoist sync requests.")
+(defconst org-todoist-http-method "POST" "The http method for Todoist sync requests.")
+(defconst org-todoist--type "TODOIST_TYPE" "The org property name for Todoist object type metadata.")
+(defconst org-todoist--collaborator-type "USER" "The org-todoist--type value for collaborator objects.")
+(defconst org-todoist--section-type "SECTION" "The org-todoist--type value for section objects.")
+(defconst org-todoist--project-type "PROJECT" "The org-todoist--type value for project objects.")
+(defconst org-todoist--task-type "TASK" "The org-todoist--type value for task objects.")
+(defconst org-todoist--user-node-type "USER_HEADLINE" "The org-todoist--type value for the collaborator metadata node.")
+(defconst org-todoist--project-node-type "PROJECT_HEADLINE" "The org-todoist--type value for the project root node.")
+(defconst org-todoist--sync-areas ["collaborators", "projects", "items", "sections"] "The types of Todoist items to sync.")
+
+(defconst org-todoist--project-skip-list '(name can_assign_tasks color is_deleted is_favorite is_frozen sync_id v2_id v2_parent_id view_style))
+(defconst org-todoist--section-skip-list '(name sync_id updated_at is_deleted v2_id v2_project_id archived_at section_order))
+(defconst org-todoist--task-skip-list '(name completed_at is_deleted content duration description checked deadline due labels priority project_id section_id sync_id v2_id v2_parent_id v2_project_id v2_section_id completed_at content day_order))
 (defconst org-todoist--sync-token-file "SYNC-TOKEN")
 (defconst org-todoist--sync-buffer-file "SYNC-BUFFER")
 
 (add-to-list 'org-fold-show-context-detail '(todoist . lineage))
 
+                                        ; Hooks;
+;; (defun item-close-hook () (when (and (equal org-state org-todoist-done-keyword)
+;;                                      (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point))))
+;;                             (org-todoist)
+;;                             ))
+;; (add-hook 'org-after-todo-state-change-hook 'item-close-hook) ;; TODO this is fragile and requires it to be done from emacs (and not eg. orgzly)?
+
+
                                         ;Data;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defvar org-todoist--storage-dir (concat (file-name-as-directory (xdg-cache-home))  "org-todoist") "Directory for org-todoist storage.")
 (defvar org-todoist--sync-err nil "The error from the last sync, if any")
+(defvar org-todoist-log-last-request t)
 (defvar org-todoist--last-request nil "The last request body, if any")
-(defvar org-todoist--last-response nil)
-(defvar org-todoist-sync-interval 60 "The interval in seconds between sync requests with Todoist servers.")
+(defvar org-todoist-log-last-response t)
+(defvar org-todoist--last-response nil "")
 (defun org-todoist--set-last-response (JSON) (with-file! (org-todoist--storage-file "PREVIOUS.json") (insert JSON)))
 (defun org-todoist--storage-file (FILE) (concat (file-name-as-directory org-todoist--storage-dir) FILE))
 (defun org-todoist--set-sync-token (TOKEN) (with-file! (org-todoist--storage-file org-todoist--sync-token-file) (goto-char (point-max)) (insert "\n") (insert TOKEN)))
@@ -139,17 +149,25 @@ show the outline up to one level above the current position.
   (interactive)
   (org-set-property "responsible_uid" "nil"))
 
+(defun org-todoist-tag-user ()
+  (interactive)
+  (when-let ((selectedelement (org-todoist--select-user)))
+    (insert (concat "@" (org-element-property :raw-value selectedelement)))))
+
+(defun org-todoist--select-user ()
+  (if-let* ((ast (org-todoist--file-ast));; TODO cache?
+            (userelements (org-element-map (org-todoist--user-node ast) 'headline
+                            (lambda (node) (when (org-todoist--node-type-query node org-todoist--collaborator-type) node))))
+            (usernames (--map (org-element-property :raw-value it) userelements))
+            (selected (completing-read "Assign to: " (append usernames "Unassign")))
+            (selectedelement (--first (string= (org-element-property :raw-value it) selected) userelements)))
+      selectedelement))
+
 (defun org-todoist-assign-task ()
   (interactive)
   ;; TODO limit to just tasks, but allow assigning for tasks that haven't been added to Todoist yet
-  (let* ((ast (org-todoist--file-ast))) ;; TODO cache?
-    (if-let* ((userelements (org-element-map (org-todoist--user-node ast) 'headline
-                              (lambda (node) (when (org-todoist--node-type-query node org-todoist--collaborator-type) node))))
-              (usernames (--map (org-element-property :raw-value it) userelements))
-              (selected (completing-read "Assign to: " (append usernames "Unassign")))
-              (selectedelement (--first (string= (org-element-property :raw-value it) selected) userelements))
-              (rid (org-element-property :ID selectedelement)))
-        (org-set-property "responsible_uid" rid))))
+  (when-let ((selectedelement (org-todoist--select-user)))
+    (org-set-property "responsible_uid" (org-element-property :ID selectedelement))))
 
 (defun org-todoist--all-users ()
   (org-element-map (org-todoist--user-node (org-todoist--file-ast)) 'headline #'identity))
@@ -160,7 +178,8 @@ show the outline up to one level above the current position.
 
 (defun org-todoist-reset (&optional ARG)
   (interactive "P")
-  (kill-buffer org-todoist-file)
+  (when (get-buffer org-todoist-file)
+    (kill-buffer org-todoist-file))
   (delete-file (org-todoist-file))
   (delete-file (org-todoist--storage-file "PREVIOUS.json"))
   (delete-file (org-todoist--storage-file org-todoist--sync-token-file))
@@ -230,7 +249,8 @@ show the outline up to one level above the current position.
                          ("resource_types" . ,(json-encode org-todoist-resource-types))
                          ("commands" . , (org-todoist--push ast old))))
          (url-request-data (org-todoist--encode request-data)))
-    (setq org-todoist--last-req url-request-data)
+    (when org-todoist-log-last-request
+      (setq org-todoist--last-request url-request-data))
     (message (if OPEN "Syncing with todoist. Buffer will open when sync is complete..." "Syncing with todoist. This may take a moment..."))
     (url-retrieve org-todoist-sync-endpoint
                   (lambda (events open ast old cur-headline show-n-levels)
@@ -241,7 +261,8 @@ show the outline up to one level above the current position.
                                     (goto-char url-http-end-of-headers)
                                     (decode-coding-region (point) (point-max) 'utf-8 t))))
                         (org-todoist--set-last-response resp) ;; TODO remove
-                        (setq org-todoist--last-response (json-read-from-string resp))
+                        (when org-todoist-log-last-response
+                          (setq org-todoist--last-response (json-read-from-string resp)))
                         (org-todoist--parse-response org-todoist--last-response ast old)
                         (if open
                             (org-todoist--handle-display cur-headline show-n-levels)
@@ -260,14 +281,21 @@ show the outline up to one level above the current position.
       (org-content)
     (org-content show-n-levels))
   (org-fold-hide-drawer-all)
-  (when cur-headline
-    (let ((pos nil))
-      (org-map-entries (lambda () (when (equal (org-entry-get nil "ITEM") cur-headline)
-                                    (setq pos (point)))))
-      (goto-char pos)
-      (org-fold-show-context 'todoist)
-      ;; (+org/open-fold)
-      )))
+  (let ((pos nil))
+    (org-map-entries (lambda ()
+                       (when (equal (org-entry-get nil "ITEM") cur-headline)
+                         (setq pos (point)))
+                       (when (equal (org-entry-get nil "collapsed") "t")
+                         (+org/close-fold))
+                       (when (equal (org-entry-get nil "is_archived") "t")
+                         (org-archive-subtree-default))
+                       (org-delete-property "collapsed")
+                       (org-delete-property "is_archived")))
+    (when cur-headline
+      (progn (goto-char pos)
+             (org-fold-show-context 'todoist)
+             ;; (+org/open-fold)
+             ))))
 
 (defun org-todoist--first-parent-of-type (NODE TYPES)
   "Gets the first parent which is one of the given TYPES.
@@ -432,6 +460,28 @@ TYPES can be a single symbol or a list of symbols."
                (last-repeat (when (and lr is-recurring) (org-timestamp-from-string lr)))
                )
           (cond ((string-equal type org-todoist--task-type)
+                 (unless id
+                   ;; item_add. No ID -> new item
+                   (let ((tid (org-id-uuid)))
+                     (org-todoist--add-prop hl "temp_id" tid)
+                     (push `(("uuid" . ,(org-id-uuid))
+                             ("temp_id" . ,tid)
+                             ("type" . "item_add")
+                             ("args" . (("content" . ,title)
+                                        ("description" . ,(when desc desc))
+                                        ("duration" . ,(when eff `(("amount" . ,eff) ("unit" . "minute"))))
+                                        ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
+                                        ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
+                                        ("priority" . ,(org-todoist--get-priority hl))
+                                        ("labels" . ,labels)
+                                        ("auto_reminder" . ,org-todoist-use-auto-reminder)
+                                        ("parent_id" . ,(org-todoist--get-task-id-position hl))
+                                        ("section_id" . ,(org-todoist--get-section-id-position hl))
+                                        ("project_id" . ,(org-todoist--get-project-id-position hl))
+                                        ("responsible_uid" . ,rid))))
+                           commands)))
+
+
                  (when oldtask
                    (let* (
                           (oldsection (org-todoist--get-section-id-position oldtask))
@@ -554,52 +604,33 @@ TYPES can be a single symbol or a list of symbols."
                                  ("type" . "item_uncomplete")
                                  ("args" . (("id" . ,id))))
                                commands))))))
-                ((org-todoist--is-task hl)
-                 ;; item_add. No todoist type means new task
-                 (unless (org-element-property :TODOIST_TYPE hl)
+                ((string= type org-todoist--section-type)
+                 (unless (or oldtask
+                             (string= title "Default"))
+                   ;; new section
+                   ;; TODO create new tasks under a new section or move tasks to new section?
+
                    (let ((tid (org-id-uuid)))
                      (org-todoist--add-prop hl "temp_id" tid)
                      (push `(("uuid" . ,(org-id-uuid))
                              ("temp_id" . ,tid)
-                             ("type" . "item_add")
-                             ("args" . (("content" . ,title)
-                                        ("description" . ,(when desc desc))
-                                        ("duration" . ,(when eff `(("amount" . ,eff) ("unit" . "minute"))))
-                                        ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
-                                        ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
-                                        ("priority" . ,(org-todoist--get-priority hl))
-                                        ("labels" . ,labels)
-                                        ("auto_reminder" . ,org-todoist-use-auto-reminder)
-                                        ("parent_id" . ,(org-todoist--get-task-id-position hl))
-                                        ("section_id" . ,(org-todoist--get-section-id-position hl))
-                                        ("project_id" . ,(org-todoist--get-project-id-position hl))
-                                        ("responsible_uid" . ,rid)
-                                        )))
-                           commands))))))))
+                             ("type" . "section_add")
+                             ("args" . (("name" . ,title)
+                                        ("project_id" . ,(org-todoist--get-project-id-position hl)))))
+                           commands))))
+                ((string= type org-todoist--project-type)
+                 ;; TODO project add
+                 )))))
     commands))
 
 (defun org-todoist--is-project (NODE)
-  (string= (org-todoist--infer-type NODE) org-todoist--project-type))
+  (string= (org-todoist--get-todoist-type NODE) org-todoist--project-type))
 
 (defun org-todoist--is-section (NODE)
-  (string= (org-todoist--infer-type NODE) org-todoist--section-type))
-
-(defun org-todoist--infer-type (NODE)
-  (if-let ((type (org-todoist--get-todoist-type NODE)))
-      type ;; already has type labeled
-    (if-let ((parenttype (org-todoist--get-todoist-type (org-element-parent NODE))))
-        (cond ((string= parenttype org-todoist--task-type) org-todoist--task-type)
-              ((string= parenttype org-todoist--section-type) org-todoist--task-type)
-              ((string= parenttype org-todoist--project-type)
-               (if (org-element-map NODE 'headline
-                     (lambda (child) (when (string= (org-todoist--get-todoist-type child) org-todoist--section-type) t))
-                     nil t)
-                   org-todoist--project-type ;; has section children -> is project
-                 org-todoist--section-type)) ;; otherwise it is probably a new section. Could be wrong.
-              (t org-todoist--project-type)))))
+  (string= (org-todoist--get-todoist-type NODE) org-todoist--section-type))
 
 (defun org-todoist--is-task (NODE)
-  (string= (org-todoist--infer-type NODE) org-todoist--task-type))
+  (string= (org-todoist--get-todoist-type NODE) org-todoist--task-type))
 ;; (org-element-lineage-map NODE (lambda (parent) (string= org-todoist--section-type (org-todoist--get-todoist-type parent))) 'headline nil t))
 ;; (or (org-element-property :TODOIST_TYPE NODE) ;; causes issues when refiling
 ;;     (org-element-lineage-map NODE (lambda (parent) (string= org-todoist--section-type (org-todoist--get-todoist-type parent))) 'headline nil t)))
@@ -612,14 +643,22 @@ TYPES can be a single symbol or a list of symbols."
         (comments (assoc-default 'notes RESPONSE))
         (token (assoc-default 'sync_token RESPONSE))
         (tid_mapping (assoc-default 'temp_id_mapping RESPONSE)))
+    (org-todoist--temp-id-mapping tid_mapping AST)
     (org-todoist--update-users collab AST)
     (org-todoist--update-projects projects AST)
     (org-todoist--update-sections sections AST)
-    (org-todoist--update-tasks tasks AST tid_mapping OLDAST)
+    (org-todoist--update-tasks tasks AST)
     (org-todoist--update-comments comments AST (org-todoist-file))
     (org-todoist--set-sync-token token)
     (org-todoist--set-last-sync-buffer AST)
     (org-todoist--update-file AST)))
+
+(defun org-todoist--temp-id-mapping (TID_MAPPING AST)
+  (dolist (elem TID_MAPPING)
+    (org-element-map AST 'headline
+      (lambda (hl) (when (equal (org-todoist--get-prop elem "temp_id") (car elem))
+                     (org-todoist--add-prop hl "id" (cdr elem)))))
+    nil t))
 
 (defun org-todoist--update-comments (COMMENTS AST FILE)
   (cl-loop for comment across COMMENTS do
@@ -649,6 +688,27 @@ TYPES can be a single symbol or a list of symbols."
 #+STARTUP: logdrawer
 ")))
 
+
+;; (section
+;;  (:standard-properties
+;;   [1 1 1 80 80 0 nil first-section nil nil nil 1 80 nil #<buffer todoist.org<2>> nil nil #0])
+;;  (keyword
+;;   (:standard-properties
+;;    [1 1 nil nil 18 0 nil top-comment nil nil nil nil nil nil #<buffer todoist.org<2>> nil nil #1]
+;;    :key "TITLE" :value "Todoist"))
+;;  (keyword
+;;   (:standard-properties
+;;    [18 18 nil nil 40 0 nil nil nil nil nil nil nil nil #<buffer todoist.org<2>> nil nil #1]
+;;    :key "FILETAGS" :value ":todoist:"))
+;;  (keyword
+;;   (:standard-properties
+;;    [40 40 nil nil 59 0 nil nil nil nil nil nil nil nil #<buffer todoist.org<2>> nil nil #1]
+;;    :key "STARTUP" :value "logdone"))
+;;  (keyword
+;;   (:standard-properties
+;;    [59 59 nil nil 80 0 nil nil nil nil nil nil nil nil #<buffer todoist.org<2>> nil nil #1]
+;;    :key "STARTUP" :value "logdrawer")))
+
 (defun org-todoist--project-node (AST)
   "Gets or creates the main project headline in AST"
   (org-todoist--category-node-query-or-create AST org-todoist-project-headline org-todoist--project-node-type))
@@ -667,10 +727,25 @@ TYPES can be a single symbol or a list of symbols."
               org-todoist--project-skip-list))
     (org-todoist--sort-by-child-order projects "child_order")
     (dolist (proj (org-todoist--project-nodes AST))
-      (when (length= (org-todoist--get-sections proj) 0) (org-todoist--create-node org-todoist--section-type "Default" nil nil proj)))))
+      (when (length= (org-todoist--get-sections proj) 0)
+        (let ((default-section (org-todoist--create-node org-todoist--section-type "Default" nil nil proj)))
+          ;; (org-todoist--add-prop default-section "id" "default") ;; TODO puts everything under the first default section? Should be limited to only searching in the project under the update tasks
+          )))))
+;; (unless (member "Default" (org-todoist--get-section-titles proj))
+;;       (let ((default-section (org-todoist--create-node org-todoist--section-type "Default" nil nil proj)))
+;;         (org-todoist--add-prop default-section "id" "default")))
 
 (defun org-todoist--get-sections (PROJECT)
-  (org-element-map PROJECT 'headline (lambda (hl) (when (equal (org-todoist--get-todoist-type hl) org-todoist--section-type) hl))))
+  (org-element-map PROJECT 'headline (lambda (hl) (when (string= (org-todoist--get-todoist-type hl) org-todoist--section-type) hl))))
+
+(defun org-todoist--get-title (NODE)
+  (let ((title (org-element-property :title NODE)))
+    (while (not (eq 'string (type-of title)))
+      (setq title (car title)))
+    (substring-no-properties title)))
+
+(defun org-todoist--get-section-titles (NODE)
+  (--map (org-todoist--get-title it) (org-todoist--get-sections NODE)))
 
 (defun org-todoist--user-node (AST)
   "Gets or creates the main user headline in AST"
@@ -711,7 +786,8 @@ TYPES can be a single symbol or a list of symbols."
                 sect
                 org-todoist--section-skip-list))))
   (dolist (proj (org-todoist--project-nodes AST))
-    (org-todoist--sort-by-child-order proj "section_order" org-todoist--section-type)))
+    (org-todoist--sort-by-child-order proj "section_order" org-todoist--section-type)
+    )) ;; TODO not adding?
 
 (defun org-todoist--project-nodes (AST)
   "Gets all project nodes within the org-todoist file"
@@ -725,7 +801,9 @@ TYPES can be a single symbol or a list of symbols."
 
 (defun org-todoist--unsectioned-node (AST)
   (org-element-map (org-todoist--project-node AST) 'headline
-    (lambda (hl) (when (and (string-equal (org-todoist--get-todoist-type hl) org-todoist--section-type) (string-equal "Unsectioned" (org-element-property :raw-value hl))) hl))))
+    (lambda (hl) (when (and (string-equal (org-todoist--get-todoist-type hl) org-todoist--section-type)
+                            (string-equal "Default" (substring-no-properties (org-element-property :title hl))))
+                   hl))))
 
 (ert-deftest org-todoist--test--project-nodes ()
   (should (length= (org-todoist--project-nodes (org-todoist--generate-sample-ast)) 2)))
@@ -772,7 +850,6 @@ TYPES can be a single symbol or a list of symbols."
 (defun org-todoist--get-or-create-node (PARENT TYPE ID TEXT DESCRIPTION PROPERTIES &optional SKIP)
   "Gets or creates a new node of TODOIST_TYPE TYPE with ID, headline TEXT,
 body DESCRIPTION, and drawer PROPERTIES, ignoring SKIP, under PARENT."
-
   (if-let* ((found (org-todoist--get-by-id TYPE ID PARENT))
             (updated (org-todoist--add-all-properties found PROPERTIES SKIP)))
       (progn
@@ -876,7 +953,7 @@ timestamp"
 DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
 " headline))))
 
-(defun org-todoist--update-tasks (TASKS AST TID_MAPPING OLDAST)
+(defun org-todoist--update-tasks (TASKS AST)
   (cl-loop for data across TASKS do
            (let* ((id (assoc-default 'id data))
                   (og (org-todoist--get-by-id org-todoist--task-type id AST))
@@ -884,27 +961,22 @@ DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
                   (section (org-todoist--get-by-id org-todoist--section-type (assoc-default 'section_id data)
                                                    ;; search in project, since the section search will match the default section if there is no section
                                                    (org-todoist--get-by-id org-todoist--project-type (assoc-default 'project_id data) AST)))
-                  (tags (assoc-default 'labels data))
-                  )
+                  (tags (assoc-default 'labels data)))
              ;; check if we need to move sections
              (unless (cl-equalp (org-todoist--get-section-id-position task) (assoc-default 'section_id data))
                (org-element-extract task)
                (org-element-adopt section task))
 
              (setq task (if og
-                            og ;; exists with id, ready to be updated
-                          ;; check if was created by our sync (has temp id)
-                          (let ((tid (org-todoist--get-by-tempid id TID_MAPPING AST data org-todoist--task-skip-list)))
-                            (if tid
-                                tid
-                              ;;create if needed
-                              (org-todoist--create-node
-                               org-todoist--task-type
-                               (assoc-default 'content data)
-                               (assoc-default 'description data)
-                               data
-                               section
-                               org-todoist--task-skip-list)))))
+                            og ;; exists ready to be updated
+                          ;;create if needed
+                          (org-todoist--create-node
+                           org-todoist--task-type
+                           (assoc-default 'content data)
+                           (assoc-default 'description data)
+                           data
+                           section
+                           org-todoist--task-skip-list)))
 
              (dotimes (i (length tags))
                (org-todoist--add-tag task (aref tags i)))
@@ -1138,12 +1210,13 @@ QUERY takes a single argument which is the current node."
 
 (defun org-todoist--get-by-id (TYPE ID AST)
   "Finds the first item of TODOIST_TYPE TYPE with id ID in the syntax tree AST."
+  ;; TODO when id?
   (org-element-map AST 'headline (lambda (hl) (when (and (or (null TYPE) (string-equal (org-todoist--get-prop hl org-todoist--type) TYPE))
                                                          (string-equal (org-todoist--get-prop hl "id") ID))
                                                 hl))
                    nil t))
 
-(defun org-todoist--get-by-tempid (ID TID_MAPPING AST PROPS SKIP)
+(defun org-todoist--get-by-tempid (ID TID_MAPPING AST)
   "Finds the item in AST corresponding to the given ID using the headlines TEMP_ID property
 and the TID_MAPPING. Add PROPS not including SKIP to found node."
   (let* ((id (cl-dolist (elem TID_MAPPING)
@@ -1153,7 +1226,8 @@ and the TID_MAPPING. Add PROPS not including SKIP to found node."
                                                 (let ((prop (org-element-property :TEMP_ID hl)))
                                                   (when (and prop (string-equal prop id)) hl)))
                                 nil t)))
-    (when elem (org-todoist--add-all-properties elem PROPS SKIP) elem)))
+    elem))
+;; (when elem (org-todoist--add-all-properties elem PROPS SKIP) elem)))
 
 (defun org-todoist--get-project-id-position (NODE)
   "Gets the ID of the project headline the NODE is under."
@@ -1357,8 +1431,20 @@ NODE unless they are in plist SKIP. RETURNS the mutated NODE."
 
 (defun org-todoist--get-todoist-type (NODE)
   "Gets the TODOIST_TYPE of a NODE."
-  ;; (org-element-property :TODOIST_TYPE NODE)) ;; doesn't work with newly added
-  (org-todoist--get-prop NODE org-todoist--type))
+  (cond
+   ;; type is already present on headline or drawer
+   ((org-todoist--get-prop NODE org-todoist--type) (org-todoist--get-prop NODE org-todoist--type))
+   (t (if-let ((parenttype (org-todoist--get-todoist-type (org-element-parent NODE))))
+          (cond ((string= parenttype org-todoist--task-type) org-todoist--task-type)
+                ((string= parenttype org-todoist--section-type) org-todoist--task-type)
+                ((string= parenttype org-todoist--project-type) org-todoist--section-type)
+                ;; TODO max recursion limits reached here
+                ;; (if (org-element-map NODE 'headline
+                ;;       (lambda (child) (when (string= (org-todoist--get-todoist-type child) org-todoist--section-type) t))
+                ;;       nil t)
+                ;;     org-todoist--project-type ;; has section children -> is project
+                ;;   org-todoist--section-type)) ;; otherwise it is probably a new section. Could be wrong.
+                (t org-todoist--project-type))))))
 
 (defun org-todoist--get-prop-elem (NODE KEY)
   "Gets the org-element property KEY of NODE."
