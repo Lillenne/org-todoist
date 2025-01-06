@@ -126,7 +126,10 @@ If using multiple computers and a synced file solution,this directory must be ac
     (thing-at-point 'line t)))
 
 (defun org-todoist--get-comments (HEADLINE)
-  (org-element-map HEADLINE 'item (lambda (item) (when (org-todoist--is-note item) item))))
+  (org-element-map HEADLINE 'item (lambda (item) (when (and
+                                                        (eq (org-todoist--first-parent-of-type item 'headline) HEADLINE)
+                                                        (org-todoist--is-note item))
+                                                   item))))
 
 (defun org-todoist--is-note (ITEM)
   "NOTE must be on the org buffer"
@@ -414,152 +417,160 @@ TYPES can be a single symbol or a list of symbols."
 
           (cond ((string-equal type org-todoist--task-type)
                  (if hastid
-                     ;; item_add. No ID -> new item
-                     (push `(("uuid" . ,(org-id-uuid))
-                             ("temp_id" . ,id)
-                             ("type" . "item_add")
-                             ("args" . (("content" . ,title)
-                                        ("description" . ,(when desc desc))
-                                        ("duration" . ,(when eff `(("amount" . ,eff) ("unit" . "minute"))))
-                                        ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
-                                        ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
-                                        ("priority" . ,(org-todoist--get-priority hl))
-                                        ("labels" . ,labels)
-                                        ("auto_reminder" . ,org-todoist-use-auto-reminder)
-                                        ("parent_id" . ,(org-todoist--get-task-id-position hl))
-                                        ("section_id" . ,(org-todoist--get-section-id-position hl))
-                                        ("project_id" . ,(org-todoist--get-project-id-position hl))
-                                        ("responsible_uid" . ,rid))))
-                           commands)
-
-                   (when oldtask
-                     (let* ((oldsection (org-todoist--get-section-id-position oldtask))
-                            (oldparenttask (org-todoist--get-task-id-position oldtask))
-                            (oldproj (org-todoist--get-project-id-position oldtask))
-                            (old-todo-type (org-element-property :todo-type oldtask))
-                            (old-todo-kw (org-element-property :todo-keyword oldtask))
-                            (oldtitle (org-element-property :raw-value oldtask))
-                            (olddesc (org-todoist--description-text oldtask))
-                            (oldpri (org-element-property :priority oldtask))
-                            (oldsch (org-element-property :scheduled oldtask))
-                            (olddead (org-element-property :deadline oldtask))
-                            (oldeffstr (org-todoist--get-prop oldtask "EFFORT"))
-                            (oldeff (when oldeffstr (org-duration-to-minutes oldeffstr)))
-                            (oldtags (org-element-property :tags oldtask))
-                            (oldlabels oldtags)
-                            ;; (oldlabels (org-todoist--get-labels oldtags))
-                            (oldisarchived (member org-archive-tag oldtags))
-                            (oldrid (org-element-property :RESPONSIBLE_UID oldtask))
-                            (oldcomments (org-todoist--get-comments-text oldtask oldfile))
-                            )
-                       (unless (equal comments oldcomments)
-                         ;; TODO support comment editing. This will push any edited comments as new comments
-                         ;; TODO comments being added twice?
-                         (dolist (comment (--filter (not (member it oldcomments)) comments))
+                     (progn
+                       ;; item_add. No ID -> new item
+                       (push `(("uuid" . ,(org-id-uuid))
+                               ("temp_id" . ,id)
+                               ("type" . "item_add")
+                               ("args" . (("content" . ,title)
+                                          ("description" . ,(when desc desc))
+                                          ("duration" . ,(when eff `(("amount" . ,eff) ("unit" . "minute"))))
+                                          ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
+                                          ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
+                                          ("priority" . ,(org-todoist--get-priority hl))
+                                          ("labels" . ,labels)
+                                          ("auto_reminder" . ,org-todoist-use-auto-reminder)
+                                          ("parent_id" . ,(org-todoist--get-task-id-position hl))
+                                          ("section_id" . ,(org-todoist--get-section-id-position hl))
+                                          ("project_id" . ,(org-todoist--get-project-id-position hl))
+                                          ("responsible_uid" . ,rid))))
+                             commands)
+                       (when comments
+                         ;; Add comments
+                         (dolist (comment comments)
                            (push `(("uuid" . ,(org-id-uuid)) ;; command uuid
                                    ("type" . "note_add")
                                    ("temp_id". ,(org-id-uuid)) ;; note uuid
                                    ("args" . (("item_id" . ,id) ;; task uuid/tempid
                                               ("content" . ,comment))))
-                                 commands)))
-
-                       ;; item_move. Only one parameter can be specified
-                       (unless (and (string= section oldsection)
-                                    (string= proj oldproj)
-                                    (string= parenttask oldparenttask))
-                         ;; TODO subtasks need to only follow their parent tasks, ignore section / project changes
-                         (cond ((and (not null parenttask) (not (string= parenttask oldparenttask)))
-                                ;; item_move - parent task
-                                (push `(("uuid" . ,(org-id-uuid))
-                                        ("type" . "item_move")
-                                        ("args" . (("id" . ,id)
-                                                   ("parent_id" . ,parenttask))))
-                                      commands))
-
-                               ;; special case: move to unsectioned in another project
-                               ((and (or (null section) (string= "" section))
-                                     (not (string= proj oldproj)))
-                                (unless parenttask
-                                  (push `(("uuid" . ,(org-id-uuid))
-                                          ("type" . "item_move")
-                                          ("args" . (("id" . ,id)
-                                                     ("project_id" . ,proj))))
-                                        commands)))
-
-                               ;; move to another section (may be another project)
-                               ((not (string= section oldsection))
-                                ;; item_move - section
-                                (push `(("uuid" . ,(org-id-uuid))
-                                        ("type" . "item_move")
-                                        ("args" . (("id" . ,id)
-                                                   ("section_id" . ,section))))
-                                      commands))
-
-
-                               ((not (string= proj oldproj))
-                                (unless (string= section oldsection) ;; whole section moved, ignore
-                                  ;;item_move - project
-                                  (push `(("uuid" . ,(org-id-uuid))
-                                          ("type" . "item_move")
-                                          ("args" . (("id" . ,id)
-                                                     ("project_id" . ,proj))))
-                                        commands)))))
-
-                       ;; item_update
-                       (when (or
-                              (not (string-equal title oldtitle))
-                              (not (equal desc olddesc))
-                              (not (string-equal (org-element-property :raw-value sch) (org-element-property :raw-value oldsch)))
-                              (not (string-equal (org-element-property :raw-value dead) (org-element-property :raw-value olddead)))
-                              (not (equal eff oldeff))
-                              (not (equal pri oldpri))
-                              (not (equal labels oldlabels)) ;; TODO archive tag
-                              (not (equal rid oldrid))
+                                 commands))))
+                   (if oldtask
+                       (let* ((oldsection (org-todoist--get-section-id-position oldtask))
+                              (oldparenttask (org-todoist--get-task-id-position oldtask))
+                              (oldproj (org-todoist--get-project-id-position oldtask))
+                              (old-todo-type (org-element-property :todo-type oldtask))
+                              (old-todo-kw (org-element-property :todo-keyword oldtask))
+                              (oldtitle (org-element-property :raw-value oldtask))
+                              (olddesc (org-todoist--description-text oldtask))
+                              (oldpri (org-element-property :priority oldtask))
+                              (oldsch (org-element-property :scheduled oldtask))
+                              (olddead (org-element-property :deadline oldtask))
+                              (oldeffstr (org-todoist--get-prop oldtask "EFFORT"))
+                              (oldeff (when oldeffstr (org-duration-to-minutes oldeffstr)))
+                              (oldtags (org-element-property :tags oldtask))
+                              (oldlabels oldtags)
+                              ;; (oldlabels (org-todoist--get-labels oldtags))
+                              (oldisarchived (member org-archive-tag oldtags))
+                              (oldrid (org-element-property :RESPONSIBLE_UID oldtask))
+                              (oldcomments (org-todoist--get-comments-text oldtask oldfile))
                               )
-                         ;; TODO HERE compare last repeat to old scheduled date. If same, we completed a recurring task and need to call item close
-                         ;; Doesn't work - last repeat logs when it was closed not the due date. Functionally the same except it doesn't log the completion on the todoist side, I think
-                         ;; (when (org-todoist--timestamp-times-equal last-repeat oldsch) ;; completed recurring task
-                         ;;   (push `(("uuid" . ,(org-id-uuid))
-                         ;;           ("type" . "item_close")
-                         ;;           ("args" . (("id" . ,id))))
-                         ;;         commands))
-                         (let ((req `(("type" . "item_update")
-                                      ("uuid" . ,(org-id-uuid))
-                                      ("args" . (("id" . ,id)
-                                                 ("content" . ,title)
-                                                 ("description" . ,(when desc desc))
-                                                 ("duration" . ,(when eff `(("amount" . ,eff) ("unit" . "minute"))))
-                                                 ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
-                                                 ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
-                                                 ("priority" . ,(org-todoist--get-priority hl))
-                                                 ("labels" . ,labels)
-                                                 ("responsible_uid" . ,rid))))))
-                           (push req commands)))
+                         (unless (equal comments oldcomments)
+                           ;; TODO support comment editing. This will push any edited comments as new comments
+                           (dolist (comment (--filter (not (member it oldcomments)) comments))
+                             (push `(("uuid" . ,(org-id-uuid)) ;; command uuid
+                                     ("type" . "note_add")
+                                     ("temp_id". ,(org-id-uuid)) ;; note uuid
+                                     ("args" . (("item_id" . ,id) ;; task uuid/tempid
+                                                ("content" . ,comment))))
+                                   commands)))
 
-                       ;; todo-state changed
-                       ;; TODO recurring task support
-                       (when (not (equal todo-type old-todo-type))
-                         (if (eq 'done todo-type)
-                             (if (string= org-todoist-deleted-keyword todo-kw)
-                                 (push `(("uuid" . ,(org-id-uuid))
-                                         ("type" . "item_delete")
-                                         ("args" . (("id" . ,id))))
-                                       commands)
-                               (if is-recurring
-                                   (push `(("uuid" . ,(org-id-uuid)) ;; TODO this doesn't work since org auto-reopens with new date. The task will instead be updated with item_update
-                                           ("type" . "item_close")
+                         ;; item_move. Only one parameter can be specified
+                         (unless (and (string= section oldsection)
+                                      (string= proj oldproj)
+                                      (string= parenttask oldparenttask))
+                           ;; TODO subtasks need to only follow their parent tasks, ignore section / project changes
+                           (cond ((and (not null parenttask) (not (string= parenttask oldparenttask)))
+                                  ;; item_move - parent task
+                                  (push `(("uuid" . ,(org-id-uuid))
+                                          ("type" . "item_move")
+                                          ("args" . (("id" . ,id)
+                                                     ("parent_id" . ,parenttask))))
+                                        commands))
+
+                                 ;; special case: move to unsectioned in another project
+                                 ((and (or (null section) (string= "" section))
+                                       (not (string= proj oldproj)))
+                                  (unless parenttask
+                                    (push `(("uuid" . ,(org-id-uuid))
+                                            ("type" . "item_move")
+                                            ("args" . (("id" . ,id)
+                                                       ("project_id" . ,proj))))
+                                          commands)))
+
+                                 ;; move to another section (may be another project)
+                                 ((not (string= section oldsection))
+                                  ;; item_move - section
+                                  (push `(("uuid" . ,(org-id-uuid))
+                                          ("type" . "item_move")
+                                          ("args" . (("id" . ,id)
+                                                     ("section_id" . ,section))))
+                                        commands))
+
+
+                                 ((not (string= proj oldproj))
+                                  (unless (string= section oldsection) ;; whole section moved, ignore
+                                    ;;item_move - project
+                                    (push `(("uuid" . ,(org-id-uuid))
+                                            ("type" . "item_move")
+                                            ("args" . (("id" . ,id)
+                                                       ("project_id" . ,proj))))
+                                          commands)))))
+
+                         ;; item_update
+                         (when (or
+                                (not (string-equal title oldtitle))
+                                (not (equal desc olddesc))
+                                (not (string-equal (org-element-property :raw-value sch) (org-element-property :raw-value oldsch)))
+                                (not (string-equal (org-element-property :raw-value dead) (org-element-property :raw-value olddead)))
+                                (not (equal eff oldeff))
+                                (not (equal pri oldpri))
+                                (not (equal labels oldlabels)) ;; TODO archive tag
+                                (not (equal rid oldrid))
+                                )
+                           ;; TODO HERE compare last repeat to old scheduled date. If same, we completed a recurring task and need to call item close
+                           ;; Doesn't work - last repeat logs when it was closed not the due date. Functionally the same except it doesn't log the completion on the todoist side, I think
+                           ;; (when (org-todoist--timestamp-times-equal last-repeat oldsch) ;; completed recurring task
+                           ;;   (push `(("uuid" . ,(org-id-uuid))
+                           ;;           ("type" . "item_close")
+                           ;;           ("args" . (("id" . ,id))))
+                           ;;         commands))
+                           (let ((req `(("type" . "item_update")
+                                        ("uuid" . ,(org-id-uuid))
+                                        ("args" . (("id" . ,id)
+                                                   ("content" . ,title)
+                                                   ("description" . ,(when desc desc))
+                                                   ("duration" . ,(when eff `(("amount" . ,eff) ("unit" . "minute"))))
+                                                   ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
+                                                   ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
+                                                   ("priority" . ,(org-todoist--get-priority hl))
+                                                   ("labels" . ,labels)
+                                                   ("responsible_uid" . ,rid))))))
+                             (push req commands)))
+
+                         ;; todo-state changed
+                         ;; TODO recurring task support
+                         (when (not (equal todo-type old-todo-type))
+                           (if (eq 'done todo-type)
+                               (if (string= org-todoist-deleted-keyword todo-kw)
+                                   (push `(("uuid" . ,(org-id-uuid))
+                                           ("type" . "item_delete")
                                            ("args" . (("id" . ,id))))
                                          commands)
-                                 (push `(("uuid" . ,(org-id-uuid))
-                                         ("type" . "item_complete")
-                                         ("args" . (("id" . ,id)
-                                                    ("date_completed" .
-                                                     ,(org-todoist--timestamp-to-utc-str (org-element-property :closed hl))))))
-                                       commands)))
-                           (push `(("uuid" . ,(org-id-uuid))
-                                   ("type" . "item_uncomplete")
-                                   ("args" . (("id" . ,id))))
-                                 commands)))))))
+                                 (if is-recurring
+                                     (push `(("uuid" . ,(org-id-uuid)) ;; TODO this doesn't work since org auto-reopens with new date. The task will instead be updated with item_update
+                                             ("type" . "item_close")
+                                             ("args" . (("id" . ,id))))
+                                           commands)
+                                   (push `(("uuid" . ,(org-id-uuid))
+                                           ("type" . "item_complete")
+                                           ("args" . (("id" . ,id)
+                                                      ("date_completed" .
+                                                       ,(org-todoist--timestamp-to-utc-str (org-element-property :closed hl))))))
+                                         commands)))
+                             (push `(("uuid" . ,(org-id-uuid))
+                                     ("type" . "item_uncomplete")
+                                     ("args" . (("id" . ,id))))
+                                   commands)))))))
                 ((and (string= type org-todoist--section-type) (not (string= title "Default")))
                  (cond ((not oldtask)
                         ;; new section
@@ -667,9 +678,12 @@ TYPES can be a single symbol or a list of symbols."
 (defun org-todoist--temp-id-mapping (TID_MAPPING AST)
   (dolist (elem TID_MAPPING)
     (org-element-map AST 'headline
-      (lambda (hl) (when (equal (org-todoist--get-prop hl "temp_id") (car elem))
-                     (org-todoist--add-prop hl "id" (cdr elem)))))
-    nil t))
+      (lambda (hl)
+        (let* ((tid (car elem))
+               (tidstr (if (symbolp tid) (symbol-name tid) tid)))
+          (when (string= (org-todoist--get-prop hl "temp_id") tidstr)
+            (org-todoist--add-prop hl "id" (cdr elem)))))
+      nil t)))
 
 (defun org-todoist--update-comments (COMMENTS AST FILE)
   (cl-loop for comment across COMMENTS do
@@ -687,7 +701,6 @@ TYPES can be a single symbol or a list of symbols."
   (save-excursion
     (goto-char (point-min))
     (insert "#+title: Todoist
-#+FILETAGS: :todoist:
 #+STARTUP: logdone
 #+STARTUP: logdrawer
 ")))
