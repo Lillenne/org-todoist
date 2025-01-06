@@ -16,6 +16,7 @@ There is currently [[https://github.com/abrochard/emacs-todoist][another excelle
 
 ** Notes
 - Once a task has been permanently deleted in Todoist, changing the TODO state in org will be reset back to org-todoist-deleted-keyword on next sync. Todoist does not support reviving permanently deleted tasks.
+- Comments on subtasks are added to both the root task and the subtask on Todoist, which is reflected here.
 * Roadmap
 
 Features are read only (unidirectional sync) unless otherwise noted.

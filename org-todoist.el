@@ -340,12 +340,13 @@ TYPES can be a single symbol or a list of symbols."
                                                                               ;; (org-todoist-org-element-to-string (org-timestamp-from-time (current-time) t t))
                                                                               " \\\\\n"
                                                                               TEXT)))))
-    (if (null drawer)
-        (org-element-adopt HL (org-element-create 'drawer '(:drawer-name "LOGBOOK") note))
-      (let ((children (org-element-contents drawer)))
-        (if children
-            (org-element-insert-before note (car children))
-          (org-element-adopt drawer note)))))
+    (if drawer
+        (if-let ((children (org-element-contents drawer)))
+            (org-element-insert-before note (car children)) ;; TODO this adds as first note in org, per standard org (todoist is the invers)
+          (org-element-adopt drawer note))
+      (setq drawer (org-element-create 'drawer '(:drawer-name "LOGBOOK") note))
+      ;; If the new drawer isn't added by the other drawers, it may get pushed under the wrong headline!
+      (org-element-insert-before drawer (org-todoist--get-property-drawer HL))))
   HL)
 
 (defun org-todoist--last-recurring-task-completion (TASK)
@@ -976,10 +977,11 @@ timestamp"
            (when-let* ((parenttaskid (assoc-default 'parent_id data))
                        (task (org-todoist--get-by-id org-todoist--task-type (assoc-default 'id data) AST))
                        (parenttask (org-todoist--get-by-id org-todoist--task-type parenttaskid AST)))
-             (org-element-adopt parenttask (org-element-put-property (org-element-extract task) :level (+ 1 (org-element-property :level parenttask)))))))
+             (org-element-adopt parenttask (org-element-put-property (org-element-extract task) :level (+ 1 (org-element-property :level parenttask))))))
+  )
 
 (defun org-todoist--list-headlines ()
-  (let ((headlines '()))
+  (let ((headlines nil))
     (org-element-map (org-element-parse-buffer) 'headline
       (lambda (headline)
         (push (org-element-property :raw-value headline) headlines)))
