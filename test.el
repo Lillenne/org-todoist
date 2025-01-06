@@ -463,7 +463,8 @@ TYPES can be a single symbol or a list of symbols."
                (eff (when effstr (org-duration-to-minutes effstr)))
                (tags (org-element-property :tags hl))
                (isarchived (member org-archive-tag tags))
-               (labels (org-todoist--get-labels tags))
+               (labels tags)
+               ;; (labels (org-todoist--get-labels tags))
                (proj (org-todoist--get-project-id-position hl))
                (section (org-todoist--get-section-id-position hl))
                (parenttask (org-todoist--get-task-id-position hl))
@@ -513,13 +514,15 @@ TYPES can be a single symbol or a list of symbols."
                             (oldeffstr (org-todoist--get-prop oldtask "EFFORT"))
                             (oldeff (when oldeffstr (org-duration-to-minutes oldeffstr)))
                             (oldtags (org-element-property :tags oldtask))
-                            (oldlabels (org-todoist--get-labels oldtags))
+                            (oldlabels oldtags)
+                            ;; (oldlabels (org-todoist--get-labels oldtags))
                             (oldisarchived (member org-archive-tag oldtags))
                             (oldrid (org-element-property :RESPONSIBLE_UID oldtask))
                             (oldcomments (org-todoist--get-comments-text oldtask oldfile))
                             )
                        (unless (equal comments oldcomments)
                          ;; TODO support comment editing. This will push any edited comments as new comments
+                         ;; TODO comments being added twice?
                          (dolist (comment (--filter (not (member it oldcomments)) comments))
                            (push `(("uuid" . ,(org-id-uuid)) ;; command uuid
                                    ("type" . "note_add")
@@ -1534,22 +1537,23 @@ NODE unless they are in plist SKIP. RETURNS the mutated NODE."
                                              test-full-date))
            (org-todoist--remove-ws test-full-date-headline-text))))
 
-(defun org-todoist--get-todoist-type (NODE)
+(defun org-todoist--get-todoist-type (NODE &optional NO-INFER)
   "Gets the TODOIST_TYPE of a NODE."
-  (cond
-   ;; type is already present on headline or drawer
-   ((org-todoist--get-prop NODE org-todoist--type) (org-todoist--get-prop NODE org-todoist--type))
-   (t (if-let ((parenttype (org-todoist--get-todoist-type (org-element-parent NODE))))
-          (cond ((string= parenttype org-todoist--task-type) org-todoist--task-type)
-                ((string= parenttype org-todoist--section-type) org-todoist--task-type)
-                ((string= parenttype org-todoist--project-type) org-todoist--section-type)
-                ;; TODO max recursion limits reached here
-                ;; (if (org-element-map NODE 'headline
-                ;;       (lambda (child) (when (string= (org-todoist--get-todoist-type child) org-todoist--section-type) t))
-                ;;       nil t)
-                ;;     org-todoist--project-type ;; has section children -> is project
-                ;;   org-todoist--section-type)) ;; otherwise it is probably a new section. Could be wrong.
-                (t org-todoist--project-type))))))
+  (if NO-INFER (org-todoist--get-prop NODE org-todoist--type)
+    (cond
+     ;; type is already present on headline or drawer
+     ((org-todoist--get-prop NODE org-todoist--type) (org-todoist--get-prop NODE org-todoist--type))
+     (t (if-let ((parenttype (org-todoist--get-todoist-type (org-element-parent NODE))))
+            (cond ((string= parenttype org-todoist--task-type) org-todoist--task-type)
+                  ((string= parenttype org-todoist--section-type) org-todoist--task-type)
+                  ((string= parenttype org-todoist--project-type) org-todoist--section-type)
+                  ;; TODO max recursion limits reached here
+                  ;; (if (org-element-map NODE 'headline
+                  ;;       (lambda (child) (when (string= (org-todoist--get-todoist-type child) org-todoist--section-type) t))
+                  ;;       nil t)
+                  ;;     org-todoist--project-type ;; has section children -> is project
+                  ;;   org-todoist--section-type)) ;; otherwise it is probably a new section. Could be wrong.
+                  (t org-todoist--project-type)))))))
 
 (defun org-todoist--get-prop-elem (NODE KEY)
   "Gets the org-element property KEY of NODE."
