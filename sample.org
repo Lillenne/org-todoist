@@ -39,6 +39,12 @@ DEADLINE: <2025-01-01 Wed 00:01> SCHEDULED: <2024-12-31 Tue 23:59>
 Description
 
 More description
+***** TODO Subtask
+:PROPERTIES:
+:TODOIST_TYPE: TASK
+:child_order: 1
+:id:       777
+:END:
 **** TODO Recurring task
 SCHEDULED: <2025-01-11 Sat ++1w>
 :PROPERTIES:

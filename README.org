@@ -35,8 +35,8 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [X] Assignee
   - [X] Skip properties to reduce drawer size
   - [-] Recurring tasks (has basic support, missing many natural language recurring due dates & only updates with item_update and not item_close)
-  - [ ] Subtask support*
-  - [ ] Quick add*
+  - [X] Subtask support
+  - [ ] Quick add
 - [-] Implement sync updates
   - [X] Manual sync read updates
   - [ ] Automated sync read updates(?)
@@ -67,12 +67,12 @@ Features are read only (unidirectional sync) unless otherwise noted.
       - [X] Refile to section
       - [X] Refile to project
     - [X] New tasks
-    - [ ] New sections*
-    - [ ] New projects*
-    - [ ] Refile section to new project*
-    - [-] Deletions
-      - [ ] Sections*
-      - [ ] Projects*
+    - [X] New sections
+    - [X] New projects
+    - [X] Refile section to new project
+    - [X] Deletions
+      - [X] Sections
+      - [X] Projects
       - [X] Tasks (pull from remote)
       - [X] Tasks (local)
 - [-] Add non-essential task items
