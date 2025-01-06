@@ -53,7 +53,7 @@ Features are read only (unidirectional sync) unless otherwise noted.
         - [ ] Sort by time added
         - [ ] Update
         - [ ] Delete
-        - [ ] Notify other users*
+        - [-] Notify other users*
       - [ ] Project comments
         - [ ] Add
         - [ ] Update
@@ -81,11 +81,18 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [ ] Better assignee filtering in agenda
   - [ ] Subproject support
 - [ ] Support org linking by id (rename current id property?)
-- [ ] Essential project packaging
-  - [ ] Provide functions in package el file
-  - [ ] Remove dev local hardcoded paths
-- [ ] Implement low priority task items
+- [-] Essential project packaging
+  - [X] Provide functions in org-todoist.el file
+  - [ ] Autoloads
+  - [X] Remove dev local hardcoded paths
+  - [ ] Better README
+    - [ ] Clearer feature explanation
+    - [ ] Examples
+    - [ ] How to use
+- [ ] Implement low priority items
   - [ ] Markdown description support
+  - [ ] Better logbook syncing (I currently am using syncthing for this)
+    - [ ] Sync via Todoist?
 * Not currently planning to implement
 - File attachments
 - Filters (use org agenda for this)
