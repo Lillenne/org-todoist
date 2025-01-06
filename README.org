@@ -96,5 +96,7 @@ Features are read only (unidirectional sync) unless otherwise noted.
 * Not currently planning to implement
 - File attachments
 - Filters (use org agenda for this)
+* Disclaimer
+This package is not associated with [[https://doist.com/][Doist]] or [[https://orgmode.org/][Org]]
 * Author's notes
 This is my first major elisp project, so I am almost certainly missing some best practices and useful tools. If you have any knowledge to share or want to contribute, please reach out, create an issue, or open a PR!

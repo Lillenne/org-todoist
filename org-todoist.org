@@ -55,6 +55,7 @@ Due dates with time and fixed timezone (like "1 January 2018 at 12:00 America/Ch
 Unless specified explicitly, dates with time are created as floating.
 ** Sort projects by favorites
 ** Add and create new sections/projects/tasks
+** Incremental file changes for backups? git in cache? Move cache to appdata?
 * General Buffer structure
 ;; AST Map
 ;; (Sync areas)
