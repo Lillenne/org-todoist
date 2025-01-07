@@ -81,7 +81,7 @@ Features are read only (unidirectional sync) unless otherwise noted.
   - [X] Effort/Duration
   - [ ] Better assignee filtering in agenda
   - [ ] Subproject support
-- [ ] Support org linking by id (rename current id property?)
+- [ ] Support org linking by id (rename current id property?) -- affects refiling via built-in org
 - [-] Essential project packaging
   - [X] Provide functions in org-todoist.el file
   - [ ] Autoloads
