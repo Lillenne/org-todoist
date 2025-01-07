@@ -22,10 +22,12 @@
 (require 'url)
 (require 's)
 (require 'org)
+(require 'org-capture)
 (require 'ts)
 (require 'dash)
 (require 'json)
 (require 'outline)
+
 
                                         ;Config;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TODO likely don't want to override user configuration. Todoist has 4 priorities.
@@ -34,22 +36,23 @@
       org-priority-lowest ?D)
 ;; (defvar url-http-end-of-headers nil) ;; defined in url, but emacs provides warning about free var when using
 (defvar org-todoist-api-token nil "The API token to use to sync with Todoist.")
-(defvar org-todoist-delete-remote-items t "When non-nil, delete remote Todoist items on Todoist when they are deleted from the org-todoist-file.
+(defvar org-todoist-delete-remote-items t
+  "Delete remote items on Todoist when deleted from the `'org-todoist-file'.
 WARNING items archived to sibling files will be detected as deleted!")
 (defvar org-todoist-file "todoist.org" "The name of the todoist org file. If relative, it is taken as relative to the org directory.")
-(defvar org-todoist-user-headline "Collaborators" "The name of the root collaborators metadata node")
+(defvar org-todoist-user-headline "Collaborators" "The name of the root collaborators metadata node.")
 (defvar org-todoist-project-headline "Projects" "The name of the project root node.")
-(defvar org-todoist-tz nil "The timezone to use when converting from Todoist time (UTC). Currently this is ignored in favor of current-time.")
+(defvar org-todoist-tz nil "The timezone to use when converting from Todoist time (UTC). Currently this is ignored in favor of `'current-time'.")
 (defvar org-todoist-lang "en")
 (defvar org-todoist-use-auto-reminder t)
-(defvar org-todoist-sync-interval 60 "The interval in seconds between sync requests with Todoist servers. Polling not yet implemented.")
-(defvar org-todoist-show-n-levels 4
+(defvar org-todoist-show-n-levels -1
   "The number of headline levels to show by default.
 If visiting the todoist buffer when sync is called, it will instead
 show the outline up to one level above the current position.
 2=projects,
 3=sections,
 4=root tasks,
+5=root tasks + 1 level of subtasks
 <0 no fold")
 (defvar org-todoist-todo-keyword "TODO" "TODO keyword for active Todoist tasks.")
 (defvar org-todoist-done-keyword "DONE" "TODO keyword for completed Todoist tasks.")
@@ -61,7 +64,7 @@ show the outline up to one level above the current position.
 (defun org-todoist-file () (org-todoist--expand-from-dir org-directory org-todoist-file))
 
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators") "The list of resource types to sync")
+(defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators") "The list of resource types to sync.")
 (defconst org-todoist-sync-endpoint "https://api.todoist.com/sync/v9/sync" "The todoist sync endpoint.")
 (defconst org-todoist-request-type "application/x-www-form-urlencoded; charset=utf-8" "The request type for Todoist sync requests.")
 (defconst org-todoist-http-method "POST" "The http method for Todoist sync requests.")
@@ -81,14 +84,16 @@ show the outline up to one level above the current position.
 (defconst org-todoist--sync-token-file "SYNC-TOKEN")
 (defconst org-todoist--sync-buffer-file "SYNC-BUFFER")
 
-(add-to-list 'org-fold-show-context-detail '(todoist . lineage))
+                                        ;Hooks;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun org-todoist--item-close-hook ()
+  (when (and (equal org-state org-todoist-done-keyword)
+             (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point))))
+    ;; TODO send only item complete command. Remove item_update for recurring tasks?
+    ;; (org-todoist-sync nil)
+    ))
+(add-hook 'org-after-todo-state-change-hook 'org-todoist--item-close-hook) ;; TODO this requires it to be done from emacs and not eg. orgzly
 
-                                        ; Hooks;
-;; (defun item-close-hook () (when (and (equal org-state org-todoist-done-keyword)
-;;                                      (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point))))
-;;                             (org-todoist)
-;;                             ))
-;; (add-hook 'org-after-todo-state-change-hook 'item-close-hook) ;; TODO this is fragile and requires it to be done from emacs (and not eg. orgzly)?
+(add-to-list 'org-fold-show-context-detail '(todoist . lineage))
 
 (defun org-todoist--sync-after-capture ()
   (unless org-note-abort
@@ -416,6 +421,12 @@ the wrong headline!"
 (defun org-todoist--get-labels (TAGS)
   (--filter (string= org-archive-tag it) TAGS))
 
+(defun org-todoist--get-section-id-position-non-default (HL)
+  "Use this when pushing updates (we don't want to send id=default) to Todoist."
+  (let ((res (org-todoist--get-section-id-position HL)))
+    (unless (string= res org-todoist--default-id)
+      res)))
+
 (defun org-todoist--push (ast old)
   (let ((commands nil)
         (curfile (org-todoist-file))
@@ -440,7 +451,7 @@ the wrong headline!"
                (labels tags)
                ;; (labels (org-todoist--get-labels tags))
                (proj (org-todoist--get-project-id-position hl))
-               (section (org-todoist--get-section-id-position hl))
+               (section (org-todoist--get-section-id-position-non-default hl))
                (parenttask (org-todoist--get-task-id-position hl))
                (rid (org-element-property :RESPONSIBLE_UID hl))
                (is-recurring (org-todoist--task-is-recurring hl))
@@ -448,7 +459,7 @@ the wrong headline!"
                (lr (org-element-property :LAST_REPEAT hl))
                (last-repeat (when (and lr is-recurring) (org-timestamp-from-string lr)))
                (oldtask (org-todoist--get-by-id nil id old))
-               (oldsection (org-todoist--get-section-id-position oldtask))
+               (oldsection (org-todoist--get-section-id-position-non-default oldtask))
                (oldparenttask (org-todoist--get-task-id-position oldtask))
                (oldproj (org-todoist--get-project-id-position oldtask))
                (old-todo-type (org-element-property :todo-type oldtask))
@@ -489,7 +500,7 @@ the wrong headline!"
                                           ("labels" . ,labels)
                                           ("auto_reminder" . ,org-todoist-use-auto-reminder)
                                           ("parent_id" . ,(org-todoist--get-task-id-position hl))
-                                          ("section_id" . ,(org-todoist--get-section-id-position hl))
+                                          ("section_id" . ,section)
                                           ("project_id" . ,(org-todoist--get-project-id-position hl))
                                           ("responsible_uid" . ,rid))))
                              commands)
@@ -611,7 +622,7 @@ the wrong headline!"
                                  ("type" . "item_uncomplete")
                                  ("args" . (("id" . ,id))))
                                commands))))))
-                ((and (string= type org-todoist--section-type) (not (string= title "Default")))
+                ((and section (string= type org-todoist--section-type))
                  (cond ((not oldtask)
                         ;; new section
                         (org-todoist--insert-identifier hl org-todoist--section-type)
@@ -671,7 +682,7 @@ the wrong headline!"
                             ("type" . "item_delete")
                             ("args" . (("id" . ,id))))
                           commands))
-                   ((string= org-todoist--section-type type)
+                   ((and (string= org-todoist--section-type type) (not (string= id org-todoist--default-id))) ;; Don't delete the default section
                     (push `(("uuid" . ,(org-id-uuid))
                             ("type" . "section_delete")
                             ("args" . (("id" . ,id))))
@@ -680,8 +691,7 @@ the wrong headline!"
                     (push `(("uuid" . ,(org-id-uuid))
                             ("type" . "project_delete")
                             ("args" . (("id" . ,id))))
-                          commands))
-                   ))))))))
+                          commands))))))))))
     (nreverse commands)))
 
 (defun org-todoist--is-subtask (NODE)
@@ -989,7 +999,7 @@ timestamp"
            (let* ((id (assoc-default 'id data))
                   (proj (org-todoist--get-by-id org-todoist--project-type (assoc-default 'project_id data) AST))
                   (section-id (assoc-default 'section_id data))
-                  (section (org-todoist--get-by-id org-todoist--section-type section-id
+                  (section (org-todoist--get-by-id org-todoist--section-type (if section-id section-id org-todoist--default-id)
                                                    ;; search in project, since the section search will match the default section if there is no section
                                                    proj))
                   (title (assoc-default 'content data))
