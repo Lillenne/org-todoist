@@ -90,6 +90,16 @@ show the outline up to one level above the current position.
 ;;                             ))
 ;; (add-hook 'org-after-todo-state-change-hook 'item-close-hook) ;; TODO this is fragile and requires it to be done from emacs (and not eg. orgzly)?
 
+(defun org-todoist--sync-after-capture ()
+  (unless org-note-abort
+    (save-excursion
+      (save-window-excursion
+        (let ((inhibit-message t))
+          (org-capture-goto-last-stored))
+        (when (string= (buffer-file-name) (org-todoist-file))
+          (org-todoist-sync t))))))
+
+(add-hook 'org-capture-after-finalize-hook #'org-todoist--sync-after-capture)
 
                                         ;Data;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; (defvar org-todoist--storage-dir (concat (file-name-as-directory (xdg-cache-home))  "org-todoist") "Directory for org-todoist storage.
@@ -155,12 +165,12 @@ If using multiple computers and a synced file solution,this directory must be ac
     (--map (org-todoist--note-text it) (org-todoist--get-comments HEADLINE))))
 
                                         ;API Requests;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun org-todoist--select-user ()
+(defun org-todoist--select-user (TEXT)
   (if-let* ((ast (org-todoist--file-ast));; TODO cache?
             (userelements (org-element-map (org-todoist--user-node ast) 'headline
                             (lambda (node) (when (org-todoist--node-type-query node org-todoist--collaborator-type) node))))
             (usernames (--map (org-element-property :raw-value it) userelements))
-            (selected (completing-read "Assign to: " (append usernames "Unassign")))
+            (selected (completing-read TEXT usernames))
             (selectedelement (--first (string= (org-element-property :raw-value it) selected) userelements)))
       selectedelement))
 
@@ -214,16 +224,19 @@ If using multiple computers and a synced file solution,this directory must be ac
                       (let ((resp (with-current-buffer (current-buffer)
                                     (goto-char url-http-end-of-headers)
                                     (decode-coding-region (point) (point-max) 'utf-8 t))))
-                        (when org-todoist-log-last-response
-                          (org-todoist--set-last-response resp) ;; TODO remove
-                          (setq org-todoist--last-response (json-read-from-string resp)))
-                        (org-todoist--parse-response org-todoist--last-response ast old)
+                        (save-window-excursion
+                          (when org-todoist-log-last-response
+                            (org-todoist--set-last-response resp) ;; TODO remove
+                            (setq org-todoist--last-response (json-read-from-string resp)))
+                          (org-todoist--parse-response org-todoist--last-response ast old)
+                          (unless open
+                            (org-todoist--handle-display cur-headline show-n-levels)))
                         (when (get-buffer org-todoist--sync-buffer-file)
                           (kill-buffer org-todoist--sync-buffer-file))
-                        (if open
-                            (org-todoist--handle-display cur-headline show-n-levels)
-                          (save-window-excursion
-                            (org-todoist--handle-display cur-headline show-n-levels)))
+                        ;; (when (and (get-buffer org-todoist-file) (not open)) ;; TODO probably shouldn't kill the buffer if it was open before we opened it, but not tracking
+                        ;;   (kill-buffer org-todoist-file))
+                        (when open
+                          (org-todoist--handle-display cur-headline show-n-levels))
                         (message "Sync complete."))))
                   `(,OPEN ,ast ,old ,cur-headline ,show-n-levels)
                   'silent
@@ -237,7 +250,8 @@ If using multiple computers and a synced file solution,this directory must be ac
       (org-content)
     (org-content show-n-levels))
   (org-fold-hide-drawer-all)
-  (let ((pos nil))
+  (let ((pos nil)
+        (inhibit-message t))
     (org-map-entries (lambda ()
                        (when (equal (org-entry-get nil "ITEM") cur-headline)
                          (setq pos (point)))
@@ -251,7 +265,8 @@ If using multiple computers and a synced file solution,this directory must be ac
       (progn (when pos (goto-char pos))
              (org-fold-show-context 'todoist)
              ;; (+org/open-fold)
-             ))))
+             )))
+  (recenter))
 
 (defun org-todoist--first-parent-of-type (NODE TYPES)
   "Gets the first parent which is one of the given TYPES.
@@ -1361,13 +1376,13 @@ NODE unless they are in plist SKIP. RETURNS the mutated NODE."
 
 (defun org-todoist-tag-user ()
   (interactive)
-  (when-let ((selectedelement (org-todoist--select-user)))
+  (when-let ((selectedelement (org-todoist--select-user "Tag: ")))
     (insert (concat "@" (org-element-property :raw-value selectedelement)))))
 
 (defun org-todoist-assign-task ()
   (interactive)
   ;; TODO limit to just tasks, but allow assigning for tasks that haven't been added to Todoist yet
-  (when-let ((selectedelement (org-todoist--select-user)))
+  (when-let ((selectedelement (org-todoist--select-user "Assign to: ")))
     (org-set-property "responsible_uid" (org-element-property :ID selectedelement))))
 
 (defun org-todoist-sync (&optional ARG)
