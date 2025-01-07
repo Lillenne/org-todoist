@@ -7,7 +7,7 @@
 ;; Created: September 15, 2024
 ;; Modified: September 15, 2024
 ;; Version: 0.0.2
-;; Keywords: todoist org
+;; Keywords: calendar org todoist
 ;; Homepage: https://github.com/lillenne/org-todoist
 ;; Package-Requires: ((emacs "29.1") (s "1.13.1") (org "9.4") (ts "0.3") (dash "2.19.1") (json "1.5"))
 ;;
@@ -27,7 +27,6 @@
 (require 'dash)
 (require 'json)
 (require 'outline)
-
 
                                         ;Config;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TODO likely don't want to override user configuration. Todoist has 4 priorities.
@@ -73,6 +72,7 @@ show the outline up to one level above the current position.
 (defconst org-todoist--section-type "SECTION" "The org-todoist--type value for section objects.")
 (defconst org-todoist--project-type "PROJECT" "The org-todoist--type value for project objects.")
 (defconst org-todoist--default-id "default" "The org-todoist--type value for the default section.")
+(defconst org-todoist--id-property "TID" "The org-todoist--type value for the default section.")
 (defconst org-todoist--task-type "TASK" "The org-todoist--type value for task objects.")
 (defconst org-todoist--user-node-type "USER_HEADLINE" "The org-todoist--type value for the collaborator metadata node.")
 (defconst org-todoist--project-node-type "PROJECT_HEADLINE" "The org-todoist--type value for the project root node.")
@@ -435,7 +435,7 @@ the wrong headline!"
       (lambda (hl)
         ;; TODO would be easier as oop, need to learn lisp oop
         (let* ((type (org-todoist--get-todoist-type hl))
-               (id (org-todoist--get-prop hl "ID"))
+               (id (org-todoist--get-prop hl org-todoist--id-property))
                (hastid (null id))
                (todo-type (org-element-property :todo-type hl))
                (todo-kw (org-element-property :todo-keyword hl))
@@ -530,7 +530,7 @@ the wrong headline!"
                                   (string= proj oldproj)
                                   (string= parenttask oldparenttask))
                        ;; TODO subtasks need to only follow their parent tasks, ignore section / project changes
-                       (cond ((and (not null parenttask) (not (string= parenttask oldparenttask)))
+                       (cond ((and parenttask (not (string= parenttask oldparenttask)))
                               ;; item_move - parent task
                               (push `(("uuid" . ,(org-id-uuid))
                                       ("type" . "item_move")
@@ -670,7 +670,7 @@ the wrong headline!"
           old
           'headline
         (lambda (hl)
-          (let ((id (org-todoist--get-prop hl "id"))
+          (let ((id (org-todoist--get-prop hl org-todoist--id-property))
                 (type (org-todoist--get-todoist-type hl)))
             (when id
               (let ((new (org-todoist--get-by-id type id ast)))
@@ -734,7 +734,7 @@ the wrong headline!"
         (let* ((tid (car elem))
                (tidstr (if (symbolp tid) (symbol-name tid) tid)))
           (when (string= (org-todoist--get-prop hl "temp_id") tidstr)
-            (org-todoist--add-prop hl "id" (cdr elem)))))
+            (org-todoist--insert-id hl (cdr elem)))))
       nil t)))
 
 (defun org-todoist--update-comments (COMMENTS AST FILE)
@@ -801,7 +801,7 @@ the wrong headline!"
     (dolist (proj (org-todoist--project-nodes AST))
       (when (length= (org-todoist--get-sections proj) 0) ;; TODO for org created nodes, need to add the default section!!
         (let ((default-section (org-todoist--create-node org-todoist--section-type "Default" nil nil proj)))
-          (org-todoist--add-prop default-section "id" "default"))))))
+          (org-todoist--add-prop default-section org-todoist--id-property "default"))))))
 
 (defun org-todoist--get-sections (PROJECT)
   (org-element-map PROJECT 'headline (lambda (hl) (when (string= (org-todoist--get-todoist-type hl) org-todoist--section-type) hl))))
@@ -919,6 +919,7 @@ When SOURCE is specified, search for the node from there. Else search from PAREN
             (updated (org-todoist--add-all-properties found PROPERTIES SKIP)))
       (progn
         (org-todoist--insert-identifier updated TYPE) ;; Probably not the best place for this. Newly created items may not have a type
+        ;; (org-todoist--insert-id updated ID)
         (org-element-put-property updated :title TEXT)
         (org-todoist--replace-description updated DESCRIPTION)
         updated)
@@ -1194,7 +1195,7 @@ QUERY takes a single argument which is the current node."
     (org-element-map AST 'headline
       (lambda (hl) (when (and (or (null TYPE)
                                   (string-equal (org-todoist--get-prop hl org-todoist--type) TYPE))
-                              (string= (org-todoist--get-prop hl "id") ID))
+                              (string= (org-todoist--get-prop hl org-todoist--id-property) ID))
                      hl))
       nil t)))
 
@@ -1212,7 +1213,7 @@ and the TID_MAPPING. Add PROPS not including SKIP to found node."
 ;; (when elem (org-todoist--add-all-properties elem PROPS SKIP) elem)))
 
 (defun org-todoist--id-or-temp-id (NODE)
-  (let ((id (org-todoist--get-prop NODE "id")))
+  (let ((id (org-todoist--get-prop NODE org-todoist--id-property)))
     (if id
         id
       (org-todoist--get-prop NODE "temp_id"))))
@@ -1251,6 +1252,10 @@ matching parent."
 (defun org-todoist--unimplemented () (error "Unimplemented feature!"))
 
                                         ;Property get/set;;;;;;;;;;;;;;;;;;;;;;
+(defun org-todoist--insert-id (NODE ID)
+  (org-todoist--add-prop NODE org-todoist--id-property ID)
+  NODE)
+
 (defun org-todoist--insert-identifier (NODE IDENTIFIER)
   "Inserts a property into the node's property drawer identifying the org-todoist i
 node. Returns the modified element."
@@ -1270,36 +1275,51 @@ node. Returns the modified element."
     (org-element-map NODE 'node-property (lambda (prop) (org-todoist--is-property prop KEY)))))
 
 (defun org-todoist--is-property (NODE KEY)
-  (when (equal (org-element-type NODE) 'node-property)
+  (when (eq (org-element-type NODE) 'node-property)
     (let ((prop (org-element-property :key NODE)))
       (string-equal-ignore-case (if (not (stringp prop)) (prin1-to-string prop) prop) (if (stringp KEY) KEY (symbol-name KEY))))))
 
 (defun org-todoist--set-prop-in-place (DRAWER KEY VALUE)
   "Checks for property KEY in DRAWER and replaces with VALUE if the key is present."
-  (when (not (eq (org-element-type DRAWER) 'property-drawer)) (error "Expected property drawer"))
+  (when (not (eq (org-element-type DRAWER) 'property-drawer))
+    (error "Expected property drawer"))
   (let ((existing (org-element-map DRAWER 'node-property
                     (lambda (prop) (when (org-todoist--is-property prop KEY) prop)) nil t)))
     (if existing
-        (org-element-put-property existing (org-todoist--to-symbol KEY) VALUE)
+        ;; (org-element-put-property existing (org-todoist--to-symbol KEY) VALUE)
+        (org-element-put-property existing :value VALUE)
       (org-element-adopt DRAWER (org-todoist--create-property KEY VALUE)))))
+
+(defun org-todoist--get-key (KEY)
+  (if (or (eq KEY 'id)
+          (and (stringp KEY)
+               (string-equal-ignore-case KEY "id")))
+      org-todoist--id-property
+    KEY))
+
+(defun org-todoist--get-value (VALUE)
+  (if (stringp VALUE)
+      VALUE
+    (prin1-to-string VALUE)))
 
 (defun org-todoist--add-prop (DRAWER KEY VALUE)
   "Adds property with KEY and VALUE to property-drawer DRAWER.
 If DRAWER is another node type, create and adopt a new property drawer.
 Replaces the current value with VALUE if property KEY already exists."
-  (unless (stringp VALUE) (setq VALUE (prin1-to-string VALUE)))
-  (let ((type (org-element-type DRAWER)))
+  (let ((key (org-todoist--get-key KEY))
+        (value (org-todoist--get-value VALUE))
+        (type (org-element-type DRAWER)))
     (cond ((eq type 'property-drawer) ;; Add directly
-           (org-todoist--set-prop-in-place DRAWER KEY VALUE)
+           (org-todoist--set-prop-in-place DRAWER key value)
            DRAWER)
           ((eq type 'headline) ;; Find drawer and update both drawer and property plist
            (let* ((headline DRAWER)
                   (drawer (org-todoist--get-property-drawer headline)))
-             (org-todoist--put-node-attribute headline (org-todoist--to-symbol KEY) VALUE) ;; update property plist
+             ;; (org-todoist--put-node-attribute headline (org-todoist--to-symbol KEY) VALUE) ;; update property plist
              (unless drawer ;; create drawer if needed
                (setq drawer (org-element-create 'property-drawer))
                (org-todoist--adopt-drawer headline drawer))
-             (org-todoist--set-prop-in-place drawer KEY VALUE)
+             (org-todoist--set-prop-in-place drawer key value)
              drawer))
           (t (signal 'todoist--error "Called org-todoist--add-prop with invalid type")))))
 
@@ -1308,10 +1328,11 @@ Replaces the current value with VALUE if property KEY already exists."
 Returns nil if not present"
   (let ((drawer (if (equal (org-element-type NODE) 'property-drawer)
                     NODE
-                  (org-todoist--get-property-drawer NODE))))
+                  (org-todoist--get-property-drawer NODE)))
+        (key (org-todoist--get-key KEY)))
     (org-element-map drawer 'node-property
       (lambda (np)
-        (when (org-todoist--is-property np KEY)
+        (when (org-todoist--is-property np key)
           (org-element-property :value np)))
       nil t)))
 
@@ -1393,7 +1414,7 @@ NODE unless they are in plist SKIP. RETURNS the mutated NODE."
   (interactive)
   ;; TODO limit to just tasks, but allow assigning for tasks that haven't been added to Todoist yet
   (when-let ((selectedelement (org-todoist--select-user "Assign to: ")))
-    (org-set-property "responsible_uid" (org-element-property :ID selectedelement))))
+    (org-set-property "responsible_uid" (org-todoist--get-prop selectedelement org-todoist--id-property))))
 
 (defun org-todoist-sync (&optional ARG)
   (interactive "P")
