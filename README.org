@@ -3,13 +3,15 @@
 
 * Org Todoist: What is it?
 Org todoist is an emacs package for *non-destructive bidirectional incremental sync* of [[https://orgmode.org/][org mode todos]] with [[https://todoist.com/][Todoist]] using org *exactly how you normally would* including:
-- CRUD[fn:1] new tasks
+- CRUD[fn:1] tasks
+  - Complete by changing TODO state
+  - Cancel by changing TODO state
   - Scheduling
   - Deadlines
-  - Effort
+  - Effort/Duration
   - Priority
   - Descriptions
-  - Tags
+  - Tags/Labels
   - Notes/Comments
   - Repeating tasks[fn:2]
   - Assignee[fn:3]
@@ -38,13 +40,19 @@ Assign tasks:
 #+end_src
 
 [[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/assign.png]]
-** Capture to a Todoist project section and automatically sync
-Sample capture template
+** Org capture to a Todoist project section
+Captures will automatically sync by default via the ~org-capture-finalize-hook~.
+
+Sample capture template:
 #+begin_src emacs-lisp
 (setq org-capture-templates
       `(("i" "Inbox" entry (file+olp ,(org-todoist-file) ,org-todoist-project-headline "Inbox" "Default") "* TODO %? %^G %^{EFFORT}p \nSCHEDULED: %^t"))
 #+end_src
 ** (Currently) unsupported features
+[X] = Implemented
+[-] = WIP or implemented with caveats
+[ ] = Not currently supported
+
 - [-] Essential task items
   - [-] Recurring tasks[fn:2]
   - [ ] Quick add
@@ -54,7 +62,7 @@ Sample capture template
      - [ ] Sort by time added
      - [ ] Update
      - [ ] Delete
-     - [-] Notify other users*
+     - [-] Notify other users
    - [ ] Project comments
      - [ ] Add
      - [ ] Update
@@ -63,6 +71,31 @@ Sample capture template
 ** Quirks
 - Once a task has been permanently deleted in Todoist, changing the TODO state in org will be reset back to org-todoist-deleted-keyword on next sync. Todoist does not support reviving permanently deleted tasks.
 - Comments on subtasks are added to both the root task and the subtask on Todoist, which is reflected here.
+* Configuration
+NOTE: To match Todoist's priority structure, this package sets the user's ~org-priority-highest~ ~org-priority-lowest~ and ~org-priority-default~ values.
+
+** Required
+Org Todoist requires a Todoist API token to function.
+
+#+begin_src emacs-lisp
+(setq org-todoist-api-token "<your-token>")
+#+end_src
+** Optional
+- ~org-todoist-delete-remote-items~
+- ~org-todoist-file~
+- ~org-todoist-use-auto-reminder~ - If newly created tasks should use Todoist's default reminder. Default ~t~.
+- ~org-todoist-show-n-levels~ - The fold level of the org buffer after sync, with caveats. See docstring. Default show all.
+- ~org-todoist-todo-keyword~ - New tasks are given this keyword.
+- ~org-todoist-done-keyword~ - Completed tasks are given this keyword.
+- ~org-todoist-deleted-keyword~ - Tasks with this keyword are deleted remotely.
+- ~org-todoist-storage-dir~ - Directory for storing Todoist sync_tokens and the previous org file for detecting changes to push.
+
+** Troubleshooting
+For troubleshooting errors, you can use the following variables and methods:
+- ~org-todoist-log-last-request~ - Set to non-nil to log the last outgoing request to the ~org-todoist--last-request~ variable
+- ~org-todoist-log-last-response~ - Set to non-nil to log the last response json to the ~org-todoist-sync-dir~ and alist to ~org-todoist--last-response~. Any
+- ~org-todoist--push-test~ - Returns the detected diff commands.
+
 * Why?
 Org mode is an excellent planning and note-taking tool, but struggles in a few areas:
 
@@ -73,8 +106,9 @@ Org mode is an excellent planning and note-taking tool, but struggles in a few a
 Todoist fills these gaps and, more importantly, my wife uses it.
 
 There is currently [[https://github.com/abrochard/emacs-todoist][another excellent integration]] for org-mode and todoist, but it takes a fundamentally different approach (stateless on-demand regeneration with the [[https://developer.todoist.com/rest/v2/#overview][REST API]] vs stateful syncing with the [[https://developer.todoist.com/sync/v9/#overview][sync API]] that can be queried by [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly]] on mobile and buffer creation with org.el vs [[https://orgmode.org/worg/dev/org-element-api.html][org-element-api]]).
+
 * Contributing, Issues, and Feature Request
-Feel free to submit an [[https://github.com/Lillenne/org-todoist/issues/new][issue or feature request]]! I'll do my best to address issues timely and evaluate feature additions. I work full time and have two very young (0-3) boys, so if there is a feature you want to add please feel free to submit a PR yourself!
+Feel free to submit an [[https://github.com/Lillenne/org-todoist/issues/new][issue or feature request]]! When submitting issues *please see the [[Troubleshooting][troubleshooting]] section and attach the response json (or at least the error information). I'll do my best to address issues timely and evaluate feature additions. I work full time and have two very young (0-3) boys, so if there is a feature you want to add please feel free to submit a PR yourself!
 
 My personal test API call data is included in the repo to show the API return format and help my own development but is protected with [[https://github.com/getsops/sops][sops]]. If you need data for any reason, please use your own.
 
@@ -84,13 +118,16 @@ Things that I am not currently planning to implement (myself! you are welcome to
 - Location notifications
 - Updating or deleting comments
 - Markdown support
+
 * Disclaimer
-This package is not associated with [[https://doist.com/][Doist]] or [[https://orgmode.org/][Org]]
+This package is not associated with, created by, or endorsed by [[https://doist.com/][Doist]] or [[https://orgmode.org/][Org]]
+
 * Author's notes
 This is my first major elisp project, so I am almost certainly missing some best practices and useful tools. If you have any knowledge to share or want to contribute, please reach out, create an issue, or open a PR!
+
 * Footnotes
-[fn:3] Assignee is a Todoist-only idea, but is supported via the [[Collaboration]] commands
+[fn:1] CRUD: create, read, update, delete
 
 [fn:2] Recurring tasks only support a subset of Todoist scheduling features. e.g. Todoists "every mon, fri" is not easily recreatable using org mode. These tasks should still be pulled down correctly from Todoist on next sync.
 
-[fn:1] CRUD: create, read, update, delete
+[fn:3] Assignee is a Todoist-only idea, but is supported via the [[Collaboration]] commands
