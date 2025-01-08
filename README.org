@@ -1,103 +1,95 @@
 #+title: Readme
+#+OPTIONS: f:t
 
 * Org Todoist: What is it?
-Org todoist is an emacs package for syncing [[https://orgmode.org/][org mode todos]] with [[https://todoist.com/][Todoist]]
+Org todoist is an emacs package for *non-destructive bidirectional incremental sync* of [[https://orgmode.org/][org mode todos]] with [[https://todoist.com/][Todoist]] using org *exactly how you normally would* including:
+- CRUD[fn:1] new tasks
+  - Scheduling
+  - Deadlines
+  - Effort
+  - Priority
+  - Descriptions
+  - Tags
+  - Notes/Comments
+  - Repeating tasks[fn:2]
+  - Assignee[fn:3]
+- CRUD[fn:1] new sections
+- CRUD[fn:1] new projects
+- Refile tasks and sections to other sections and projects
+
+Commands are automatically detected and batched by diffing the current ~org-todoist-file~ with the abstract syntax tree of a snapshot of the previous sync and nodes are updated in place, meaning *unsupport metadata (such as time tracking information and additional properties) is retained*.
+
+As a primary reason for developing this package, *Org Todoist also supports collaboration with other users* via assigning tasks and notifications.
+
+[[https://www.github.com/Lillenne/org-todoist/readme-images/demo.png]]
+* Features
+** Bidirectional sync
+#+begin_src emacs-lisp
+;; When (not ARG), go to the Todoist buffer.
+(org-todoist-sync &optional ARG)
+#+end_src
+
+** Collaboration
+Assign tasks:
+#+begin_src emacs-lisp
+(org-todoist-assign-task)
+(org-todoist-unassign-task)
+(org-todoist-tag-user)
+#+end_src
+
+[[https://www.github.com/Lillenne/org-todoist/readme-images/assign.png]]
+** Capture to a Todoist project section and automatically sync
+Sample capture template
+#+begin_src emacs-lisp
+(setq org-capture-templates
+      `(("i" "Inbox" entry (file+olp ,(org-todoist-file) ,org-todoist-project-headline "Inbox" "Default") "* TODO %? %^G %^{EFFORT}p \nSCHEDULED: %^t"))
+#+end_src
+** (Currently) unsupported features
+- [-] Essential task items
+  - [-] Recurring tasks[fn:2]
+  - [ ] Quick add
+ - [-] Comments
+   - [-] Item comments
+     - [X] Add
+     - [ ] Sort by time added
+     - [ ] Update
+     - [ ] Delete
+     - [-] Notify other users*
+   - [ ] Project comments
+     - [ ] Add
+     - [ ] Update
+     - [ ] Delete
+     - [ ] Notify other users
+** Quirks
+- Once a task has been permanently deleted in Todoist, changing the TODO state in org will be reset back to org-todoist-deleted-keyword on next sync. Todoist does not support reviving permanently deleted tasks.
+- Comments on subtasks are added to both the root task and the subtask on Todoist, which is reflected here.
 * Why?
 Org mode is an excellent planning and note-taking tool, but struggles in a few areas:
 
-- Collaboration with non-neckbeards
+- Collaboration with others
 - Mobile app features / availability (shoutout to [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly for their great android app]])
 - Sync between devices (I personally use [[https://syncthing.net/][Syncthing]] which works well, but will often have conflicts when adding from the widget)
 
 Todoist fills these gaps and, more importantly, my wife uses it.
 
 There is currently [[https://github.com/abrochard/emacs-todoist][another excellent integration]] for org-mode and todoist, but it takes a fundamentally different approach (stateless on-demand regeneration with the [[https://developer.todoist.com/rest/v2/#overview][REST API]] vs stateful syncing with the [[https://developer.todoist.com/sync/v9/#overview][sync API]] that can be queried by [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly]] on mobile and buffer creation with org.el vs [[https://orgmode.org/worg/dev/org-element-api.html][org-element-api]]).
-* Features
+* Contributing, Issues, and Feature Request
+Feel free to submit an [[https://github.com/Lillenne/org-todoist/issues/new][issue or feature request]]! I'll do my best to address issues timely and evaluate feature additions. I work full time and have two very young (0-3) boys, so if there is a feature you want to add please feel free to submit a PR yourself!
 
-** Notes
-- Once a task has been permanently deleted in Todoist, changing the TODO state in org will be reset back to org-todoist-deleted-keyword on next sync. Todoist does not support reviving permanently deleted tasks.
-- Comments on subtasks are added to both the root task and the subtask on Todoist, which is reflected here.
-* Roadmap
+My personal test API call data is included in the repo to show the API return format and help my own development but is protected with [[https://github.com/getsops/sops][sops]]. If you need data for any reason, please use your own.
 
-Features are read only (unidirectional sync) unless otherwise noted.
-
-- [X] Generate skeleton todoist buffer on-demand
-  - [X] Projects
-  - [X] Sections
-  - [X] Tasks
-  - [X] Collaborators
-- [-] Add essential task items
-  - [X] TODO status
-  - [X] Tags/labels
-  - [X] Scheduled
-  - [X] Deadline
-  - [X] Completed (currently in utc)
-  - [X] Priority
-  - [X] Assignee
-  - [X] Skip properties to reduce drawer size
-  - [-] Recurring tasks (has basic support, missing many natural language recurring due dates & only updates with item_update and not item_close)
-  - [X] Subtask support
-  - [ ] Quick add
-- [-] Implement sync updates
-  - [X] Manual sync read updates
-  - [ ] Automated sync read updates(?)
-  - [-] Push updates
-    - [X] TODO state
-    - [X] Title
-    - [X] Scheduled
-    - [X] Deadline
-    - [X] Completed
-    - [X] Description
-    - [-] Comments
-      - [-] Item comments
-        - [X] Add
-        - [ ] Sort by time added
-        - [ ] Update
-        - [ ] Delete
-        - [-] Notify other users*
-      - [ ] Project comments
-        - [ ] Add
-        - [ ] Update
-        - [ ] Delete
-        - [ ] Notify other users
-    - [X] Effort
-    - [X] Priority
-    - [X] Labels
-    - [X] Assigned to
-    - [X] Task refiling
-      - [X] Refile to section
-      - [X] Refile to project
-    - [X] New tasks
-    - [X] New sections
-    - [X] New projects
-    - [X] Refile section to new project
-    - [X] Deletions
-      - [X] Sections
-      - [X] Projects
-      - [X] Tasks (pull from remote)
-      - [X] Tasks (local)
-- [-] Add non-essential task items
-  - [X] Datetime for scheduled / deadline (time of day)
-  - [X] Effort/Duration
-  - [ ] Better assignee filtering in agenda
-  - [ ] Subproject support
-- [X] Support native org refile commands (within todoist buffer only)
-- [-] Essential project packaging
-  - [X] Provide functions in org-todoist.el file
-  - [ ] Autoloads
-  - [X] Remove dev local hardcoded paths
-  - [ ] Better README
-    - [ ] Clearer feature explanation
-    - [ ] Examples
-    - [ ] How to use
-- [ ] Implement low priority items
-  - [ ] Markdown description support
-  - [ ] Better logbook syncing (I currently am using syncthing for this)
-    - [ ] Sync via Todoist?
-* Not currently planning to implement
+Things that I am not currently planning to implement (myself! you are welcome to!) due to time restrictions or it not being important to my workflow:
 - File attachments
 - Filters (use org agenda for this)
+- Location notifications
+- Updating or deleting comments
+- Markdown support
 * Disclaimer
 This package is not associated with [[https://doist.com/][Doist]] or [[https://orgmode.org/][Org]]
 * Author's notes
 This is my first major elisp project, so I am almost certainly missing some best practices and useful tools. If you have any knowledge to share or want to contribute, please reach out, create an issue, or open a PR!
+* Footnotes
+[fn:3] Assignee is a Todoist-only idea, but is supported via the [[Collaboration]] commands
+[fn:2] Recurring tasks only support a subset of Todoist scheduling features. e.g. Todoists "every mon, fri" is not easily recreatable using org mode. These tasks should still be pulled down correctly from Todoist on next sync.
+
+[fn:1] CRUD: create, read, update, delete
