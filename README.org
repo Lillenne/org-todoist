@@ -21,7 +21,7 @@ Commands are automatically detected and batched by diffing the current ~org-todo
 
 As a primary reason for developing this package, *Org Todoist also supports collaboration with other users* via assigning tasks and notifications.
 
-[[https://www.github.com/Lillenne/org-todoist/readme-images/demo.png]]
+[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/demo.png]]
 * Features
 ** Bidirectional sync
 #+begin_src emacs-lisp
@@ -37,7 +37,7 @@ Assign tasks:
 (org-todoist-tag-user)
 #+end_src
 
-[[https://www.github.com/Lillenne/org-todoist/readme-images/assign.png]]
+[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/assign.png]]
 ** Capture to a Todoist project section and automatically sync
 Sample capture template
 #+begin_src emacs-lisp
@@ -90,6 +90,7 @@ This package is not associated with [[https://doist.com/][Doist]] or [[https://o
 This is my first major elisp project, so I am almost certainly missing some best practices and useful tools. If you have any knowledge to share or want to contribute, please reach out, create an issue, or open a PR!
 * Footnotes
 [fn:3] Assignee is a Todoist-only idea, but is supported via the [[Collaboration]] commands
+
 [fn:2] Recurring tasks only support a subset of Todoist scheduling features. e.g. Todoists "every mon, fri" is not easily recreatable using org mode. These tasks should still be pulled down correctly from Todoist on next sync.
 
 [fn:1] CRUD: create, read, update, delete
