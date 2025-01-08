@@ -27,6 +27,7 @@
 (require 'dash)
 (require 'json)
 (require 'outline)
+(require 'xdg)
 
                                         ;Config;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TODO likely don't want to override user configuration. Todoist has 4 priorities.
@@ -38,7 +39,8 @@
 (defvar org-todoist-delete-remote-items t
   "Delete remote items on Todoist when deleted from the `'org-todoist-file'.
 WARNING items archived to sibling files will be detected as deleted!")
-(defvar org-todoist-file "todoist.org" "The name of the todoist org file. If relative, it is taken as relative to the org directory.")
+(defvar org-todoist-file "todoist.org" "The name of the todoist org file.
+If relative, it is taken as relative to the org directory.")
 (defvar org-todoist-user-headline "Collaborators" "The name of the root collaborators metadata node.")
 (defvar org-todoist-project-headline "Projects" "The name of the project root node.")
 (defvar org-todoist-tz nil "The timezone to use when converting from Todoist time (UTC). Currently this is ignored in favor of `'current-time'.")
@@ -46,8 +48,8 @@ WARNING items archived to sibling files will be detected as deleted!")
 (defvar org-todoist-use-auto-reminder t)
 (defvar org-todoist-show-n-levels -1
   "The number of headline levels to show by default.
-If visiting the todoist buffer when sync is called, it will instead
-show the outline up to one level above the current position.
+If visiting the todoist buffer when sync is called, it will attempt to respect the
+visibility of the item at pos.
 2=projects,
 3=sections,
 4=root tasks,
@@ -56,11 +58,13 @@ show the outline up to one level above the current position.
 (defvar org-todoist-todo-keyword "TODO" "TODO keyword for active Todoist tasks.")
 (defvar org-todoist-done-keyword "DONE" "TODO keyword for completed Todoist tasks.")
 (defvar org-todoist-deleted-keyword "CANCELED" "TODO keyword for deleted Todoist tasks.")
-(defun org-todoist--expand-from-dir (dir file)
-  (if (file-name-absolute-p file)
-      file
-    (concat (expand-file-name dir) file)))
-(defun org-todoist-file () (org-todoist--expand-from-dir org-directory org-todoist-file))
+
+(defvar org-todoist-storage-dir (concat (file-name-as-directory (xdg-cache-home)) "org-todoist")
+  "The directory for org-todoist storage.
+
+If using multiple computers and a synced file solution,
+this directory must be accessible on all PCs")
+(defun org-todoist-file () (expand-file-name org-todoist-file org-directory))
 
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators") "The list of resource types to sync.")
@@ -72,9 +76,10 @@ show the outline up to one level above the current position.
 (defconst org-todoist--section-type "SECTION" "The org-todoist--type value for section objects.")
 (defconst org-todoist--project-type "PROJECT" "The org-todoist--type value for project objects.")
 (defconst org-todoist--default-id "default" "The org-todoist--type value for the default section.")
-(defconst org-todoist--id-property "TID" "The org-todoist--type value for the default section.")
+(defconst org-todoist--id-property "tid" "The org-todoist--type value for the default section.")
 (defconst org-todoist--task-type "TASK" "The org-todoist--type value for task objects.")
 (defconst org-todoist--user-node-type "USER_HEADLINE" "The org-todoist--type value for the collaborator metadata node.")
+(defconst org-todoist--default-section-name "Default Section")
 (defconst org-todoist--project-node-type "PROJECT_HEADLINE" "The org-todoist--type value for the project root node.")
 (defconst org-todoist--sync-areas ["collaborators", "projects", "items", "sections"] "The types of Todoist items to sync.")
 
@@ -107,19 +112,16 @@ show the outline up to one level above the current position.
 (add-hook 'org-capture-after-finalize-hook #'org-todoist--sync-after-capture)
 
                                         ;Data;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; (defvar org-todoist--storage-dir (concat (file-name-as-directory (xdg-cache-home))  "org-todoist") "Directory for org-todoist storage.
-(defvar org-todoist--storage-dir (org-todoist--expand-from-dir org-directory "todoist-sync")
-  "The directory for org-todoist storage.
-
-If using multiple computers and a synced file solution,this directory must be accessible on all PCs")
 (defvar org-todoist--sync-err nil "The error from the last sync, if any.")
 (defvar org-todoist-log-last-request t)
 (defvar org-todoist--last-request nil "The last request body, if any and org-todoist-log-last-request is non-nil.")
 (defvar org-todoist-log-last-response t)
 (defvar org-todoist--last-response nil "The last parsed response, if any and org-todoist-log-last-response is non-nil.")
-(defun org-todoist--set-last-response (JSON) (with-file! (org-todoist--storage-file "PREVIOUS.json") (insert JSON)))
-(defun org-todoist--storage-file (FILE) (concat (file-name-as-directory org-todoist--storage-dir) FILE))
-(defun org-todoist--set-sync-token (TOKEN) (with-file! (org-todoist--storage-file org-todoist--sync-token-file) (goto-char (point-max)) (insert "\n") (insert TOKEN)))
+(defun org-todoist--set-last-response (JSON)
+  (with-file! (org-todoist--storage-file "PREVIOUS.json") (insert JSON)))
+(defun org-todoist--storage-file (FILE) (concat (file-name-as-directory org-todoist-storage-dir) FILE))
+(defun org-todoist--set-sync-token (TOKEN)
+  (with-file! (org-todoist--storage-file org-todoist--sync-token-file) (insert TOKEN)))
 (defun org-todoist--get-sync-token ()
   (if (file-exists-p (org-todoist--storage-file org-todoist--sync-token-file))
       (let ((res (with-file-contents! (org-todoist--storage-file org-todoist--sync-token-file) (get-last-line))))
@@ -151,7 +153,7 @@ If using multiple computers and a synced file solution,this directory must be ac
   (s-contains? "Note" (org-todoist--item-text ITEM)))
 
 (defun org-todoist--item-text (ITEM)
-  ;; May want to always user org-element-to-string since it doesn't require the buffer. Don't remember about including / excluding bullets
+  ;; TODO May want to always user org-element-to-string since it doesn't require the buffer. Don't remember about including / excluding bullets
   (if (and (org-element-contents-begin ITEM) (org-element-contents-end ITEM))
       (buffer-substring-no-properties (org-element-contents-begin ITEM) (org-element-contents-end ITEM))
     (org-todoist-org-element-to-string ITEM)))
@@ -161,7 +163,6 @@ If using multiple computers and a synced file solution,this directory must be ac
   (let ((text (org-todoist--item-text ITEM)))
     (when (s-contains? "Note taken on [" text) (s-trim-right (s-join "\n" (--map (s-trim it) (cdr (s-lines text))))))))
 
-;; (defun org-todoist--get-comments-text (HEADLINE)
 (defun org-todoist--get-comments-text (HEADLINE &optional FILE)
   "NOTE must be on the org buffer or specify buffer as FILE"
   (if FILE
@@ -231,7 +232,7 @@ If using multiple computers and a synced file solution,this directory must be ac
                                     (decode-coding-region (point) (point-max) 'utf-8 t))))
                         (save-window-excursion
                           (when org-todoist-log-last-response
-                            (org-todoist--set-last-response resp) ;; TODO remove
+                            (org-todoist--set-last-response resp)
                             (setq org-todoist--last-response (json-read-from-string resp)))
                           (org-todoist--parse-response org-todoist--last-response ast old)
                           (unless open
@@ -478,6 +479,7 @@ the wrong headline!"
                (oldrid (org-element-property :RESPONSIBLE_UID oldtask))
                (oldcomments (org-todoist--get-comments-text oldtask oldfile))
                )
+
           ;; new object. Create temp id
           (unless id
             (setq id (org-id-uuid))
@@ -622,7 +624,7 @@ the wrong headline!"
                                  ("type" . "item_uncomplete")
                                  ("args" . (("id" . ,id))))
                                commands))))))
-                ((and section (string= type org-todoist--section-type))
+                ((and (not section) (string= type org-todoist--section-type) (not (string= org-todoist--default-section-name title)))
                  (cond ((not oldtask)
                         ;; new section
                         (org-todoist--insert-identifier hl org-todoist--section-type)
@@ -630,9 +632,9 @@ the wrong headline!"
                                 ("temp_id" . ,id)
                                 ("type" . "section_add")
                                 ("args" . (("name" . ,title)
-                                           ("project_id" . ,(org-todoist--get-project-id-position hl)))))
+                                           ("project_id" . ,proj))))
                               commands))
-                       ((not (string= title (org-element-property :raw-value oldtask)))
+                       ((not (string= title oldtitle))
                         ;; update section
                         (push `(("uuid" . ,(org-id-uuid))
                                 ("type" . "section_update")
@@ -640,7 +642,7 @@ the wrong headline!"
                                            ("id" . ,id))))
                               commands)
                         )
-                       ((not (equal proj (org-todoist--get-project-id-position oldtask)))
+                       ((and oldtask (not (cl-equalp proj oldproj)))
                         ;; section_move
                         (push `(("uuid" . ,(org-id-uuid))
                                 ("type" . "section_move")
@@ -799,16 +801,16 @@ the wrong headline!"
                  (org-element-extract node))))
     (org-todoist--sort-by-child-order projects "child_order")
     (dolist (proj (org-todoist--project-nodes AST))
-      (when (length= (org-todoist--get-sections proj) 0) ;; TODO for org created nodes, need to add the default section!!
-        (let ((default-section (org-todoist--create-node org-todoist--section-type "Default" nil nil proj)))
-          (org-todoist--add-prop default-section org-todoist--id-property "default"))))))
+      (unless (member org-todoist--default-section-name (org-todoist--get-section-titles proj))
+        (let ((default-section (org-todoist--create-node org-todoist--section-type org-todoist--default-section-name nil nil proj)))
+          (org-todoist--add-prop default-section org-todoist--id-property org-todoist--default-id))))))
 
 (defun org-todoist--get-sections (PROJECT)
   (org-element-map PROJECT 'headline (lambda (hl) (when (string= (org-todoist--get-todoist-type hl) org-todoist--section-type) hl))))
 
 (defun org-todoist--get-title (NODE)
   (let ((title (org-element-property :title NODE)))
-    (while (not (eq 'string (type-of title)))
+    (while (and title (not (eq 'string (type-of title))))
       (setq title (car title)))
     (substring-no-properties title)))
 
@@ -874,7 +876,7 @@ the wrong headline!"
 (defun org-todoist--unsectioned-node (AST)
   (org-element-map (org-todoist--project-node AST) 'headline
     (lambda (hl) (when (and (string-equal (org-todoist--get-todoist-type hl) org-todoist--section-type)
-                            (string-equal "Default" (substring-no-properties (org-element-property :title hl))))
+                            (string-equal org-todoist--default-section-name (substring-no-properties (org-element-property :title hl))))
                    hl))))
 
 (defun org-todoist--get-headline-level (NODE)
@@ -1073,7 +1075,7 @@ timestamp"
   ;;        (sorted (cl-sort children (lambda (a b) (< (org-todoist--get-position a PROPERTY) (org-todoist--get-position b PROPERTY))))))
   ;;   (dolist (child sorted)
   ;;     (org-element-adopt NODE (org-element-extract child))))
-  ;; TODO not rearranging sections.
+  ;; TODO not rearranging sections. Revisted: probably from direct parent requirement when sections may be in e.g. a section org element?
   )
 
 (defun org-todoist--set-effort (NODE TASK)
@@ -1149,7 +1151,7 @@ timestamp"
 
 (defun org-todoist--description-text (NODE)
   "Combines all paragraphs under NODE and returns the concatenated string"
-  (s-trim-right (mapconcat #'org-todoist-org-element-to-string (org-todoist--get-description-elements NODE))))
+  (mapconcat #'org-todoist-org-element-to-string (org-todoist--get-description-elements NODE)))
 
 (defun org-todoist--category-node-query-or-create (AST DEFAULT TYPE)
   "Finds the first node of TODOIST_TYPE TYPE under AST, else create it with
@@ -1178,7 +1180,6 @@ DEFAULT text."
   "Parses the AST of the org-todoist-file"
   (save-window-excursion
     (let ((created (not (file-exists-p (org-todoist-file)))))
-      (when created (create-file-buffer (org-todoist-file)))
       (find-file (org-todoist-file))
       (when created (erase-buffer) (org-todoist--insert-header))
       (org-element-parse-buffer))))
