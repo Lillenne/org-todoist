@@ -2,7 +2,11 @@
 #+OPTIONS: f:t
 
 * Org Todoist: What is it?
-Org todoist is an emacs package for *non-destructive bidirectional incremental sync* of [[https://orgmode.org/][org mode todos]] with [[https://todoist.com/][Todoist]] using org *exactly how you normally would* including:
+An *Emacs package for bidirectional incremental sync* of [[https://orgmode.org/][Org Mode]] elements with [[https://todoist.com/][Todoist]] using org /exactly how you normally would in Emacs Org Mode/.
+
+[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/demo.png]]
+
+** Key features
 - CRUD[fn:1] tasks
   - Complete by changing TODO state
   - Cancel by changing TODO state
@@ -15,24 +19,28 @@ Org todoist is an emacs package for *non-destructive bidirectional incremental s
   - Notes/Comments
   - Repeating tasks[fn:2]
   - Assignee[fn:3]
+  - Retains LOGBOOK information (/e.g.,/ clocking)
 - CRUD[fn:1] new sections
 - CRUD[fn:1] new projects
 - Refile tasks and sections to other sections and projects
 
-Commands are automatically detected and batched by diffing the current ~org-todoist-file~ with the abstract syntax tree of a snapshot of the previous sync and nodes are updated in place, meaning *unsupport metadata (such as time tracking information and additional properties) is retained*.
+/Org Todoist also supports collaboration with other users/ via assigning tasks and notifications.
 
-As a primary reason for developing this package, *Org Todoist also supports collaboration with other users* via assigning tasks and notifications.
+** How it works
+Commands are automatically detected and batched by diffing the current ~org-todoist-file~ with the abstract syntax tree from a snapshot of the previous sync and nodes are updated in place using a single asynchronous request, meaning /metadata (such as time tracking information and additional properties) is retained/.
 
-[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/demo.png]]
-* Features
+Syncing is done using the [[https://developer.todoist.com/sync/v9/#overview][Todoist sync API]], which sends a single request for both pulling and pushing. *Local changes will overwrite remote changes!*
+
+* Usage
 ** Bidirectional sync
 #+begin_src emacs-lisp
-;; When (not ARG), go to the Todoist buffer.
+;; Unless ARG, go to the Todoist buffer.
 (org-todoist-sync &optional ARG)
 #+end_src
 
+*Local changes will overwrite remote changes!*
+
 ** Collaboration
-Assign tasks:
 #+begin_src emacs-lisp
 (org-todoist-assign-task)
 (org-todoist-unassign-task)
@@ -41,7 +49,7 @@ Assign tasks:
 
 [[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/assign.png]]
 ** Org capture to a Todoist project section
-Captures will automatically sync by default via the ~org-capture-finalize-hook~.
+/Captures will automatically sync by default/ via the ~org-capture-finalize-hook~.
 
 Sample capture template:
 #+begin_src emacs-lisp
@@ -58,7 +66,7 @@ Sample capture template:
   - [ ] Quick add
  - [-] Comments
    - [-] Item comments
-     - [X] Add
+     - [X] Add and pull (plain-text only)
      - [ ] Sort by time added
      - [ ] Update
      - [ ] Delete
@@ -72,17 +80,17 @@ Sample capture template:
 - Once a task has been permanently deleted in Todoist, changing the TODO state in org will be reset back to org-todoist-deleted-keyword on next sync. Todoist does not support reviving permanently deleted tasks.
 - Comments on subtasks are added to both the root task and the subtask on Todoist, which is reflected here.
 * Configuration
-NOTE: To match Todoist's priority structure, this package sets the user's ~org-priority-highest~ ~org-priority-lowest~ and ~org-priority-default~ values.
+*NOTE:* To match Todoist's 4 priority structure, this package sets the user's ~org-priority-highest~ ~org-priority-lowest~ and ~org-priority-default~ values.
 
 ** Required
-Org Todoist requires a Todoist API token to function.
+Org Todoist requires a [[https://todoist.com/help/articles/find-your-api-token-Jpzx9IIlB][Todoist API token]] to function.
 
 #+begin_src emacs-lisp
 (setq org-todoist-api-token "<your-token>")
 #+end_src
 ** Optional
-- ~org-todoist-delete-remote-items~
-- ~org-todoist-file~
+- ~org-todoist-delete-remote-items~ - If non-nil, delete items no longer present in the org todoist buffer after the last sync. *This will also delete tasks refiled or archived to a separate file from Todoist*.
+- ~org-todoist-file~ - The file to use for Todoist tasks.
 - ~org-todoist-use-auto-reminder~ - If newly created tasks should use Todoist's default reminder. Default ~t~.
 - ~org-todoist-show-n-levels~ - The fold level of the org buffer after sync, with caveats. See docstring. Default show all.
 - ~org-todoist-todo-keyword~ - New tasks are given this keyword.
@@ -105,7 +113,7 @@ Org mode is an excellent planning and note-taking tool, but struggles in a few a
 
 Todoist fills these gaps and, more importantly, my wife uses it.
 
-There is currently [[https://github.com/abrochard/emacs-todoist][another excellent integration]] for org-mode and todoist, but it takes a fundamentally different approach (stateless on-demand regeneration with the [[https://developer.todoist.com/rest/v2/#overview][REST API]] vs stateful syncing with the [[https://developer.todoist.com/sync/v9/#overview][sync API]] that can be queried by [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly]] on mobile and buffer creation with org.el vs [[https://orgmode.org/worg/dev/org-element-api.html][org-element-api]]).
+There is currently [[https://github.com/abrochard/emacs-todoist][another great integration]] for org-mode and todoist, but it takes a fundamentally different approach (stateless on-demand regeneration using many requests with the [[https://developer.todoist.com/rest/v2/#overview][REST API]] vs stateful syncing with a single request to the [[https://developer.todoist.com/sync/v9/#overview][sync API]] that can be queried by [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly]] on mobile and buffer creation with org.el vs [[https://orgmode.org/worg/dev/org-element-api.html][org-element-api]]).
 
 * Contributing, Issues, and Feature Request
 Feel free to submit an [[https://github.com/Lillenne/org-todoist/issues/new][issue or feature request]]! When submitting issues *please see the [[Troubleshooting][troubleshooting]] section and attach the response json (or at least the error information). I'll do my best to address issues timely and evaluate feature additions. I work full time and have two very young (0-3) boys, so if there is a feature you want to add please feel free to submit a PR yourself!
