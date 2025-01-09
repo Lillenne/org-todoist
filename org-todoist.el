@@ -888,11 +888,15 @@ the wrong headline!"
     (when PARENT (org-element-adopt PARENT node))
     node))
 
-(defun org-todoist--make-description (DESCRIPTION)
-  (if (s-ends-with? "\n" DESCRIPTION) DESCRIPTION (concat DESCRIPTION "\n")))
-
 (defun org-todoist--add-description (NODE DESCRIPTION)
-  (org-element-adopt NODE (org-element-create 'plain-text nil (org-todoist--make-description DESCRIPTION))))
+  (org-element-adopt NODE (org-todoist--create-description-element DESCRIPTION)))
+
+(defun org-todoist--create-description-element (DESCRIPTION)
+  (org-element-create 'paragraph nil
+                      (org-element-create 'plain-text nil
+                                          (if (s-ends-with? "\n" DESCRIPTION)
+                                              DESCRIPTION
+                                            (concat DESCRIPTION "\n")))))
 
 (defun org-todoist--replace-description (NODE DESCRIPTION)
   "Replaces the description of NODE with DESCRIPTION."
@@ -903,7 +907,7 @@ the wrong headline!"
           ;; Replace the description
           (dolist (paragraph (org-todoist--get-description-elements NODE))
             (if (eql idx 0)
-                (org-element-set paragraph (org-element-create 'plain-text nil (org-todoist--make-description DESCRIPTION)))
+                (org-element-set paragraph (org-todoist--create-description-element DESCRIPTION))
               (org-element-extract paragraph))
             (cl-incf idx))
           (when (eql idx 0) (org-todoist--add-description NODE DESCRIPTION)) ;; There was no description, add the new one
@@ -1141,14 +1145,19 @@ timestamp"
 
 (defun org-todoist--get-description-elements (NODE)
   "Gets all paragraph elements that are not in a drawer."
-  (org-element-map NODE t #'org-todoist--is-description-element nil nil 'drawer))
+  (org-element-map NODE t (lambda (node) (when (org-todoist--is-description-element node NODE) node)) nil nil 'drawer))
 
-(defun org-todoist--is-description-element (NODE)
-  "t if the NODE is a paragraph or plain-text element and is not in a drawer."
+(defun org-todoist--is-description-element (NODE PARENT)
+  "t if the NODE is a paragraph element and is not in a drawer."
   ;; TODO this doesn't seem to be working properly. Doesn't filter out items in drawers.
-  (when (or (eq (org-element-type NODE) 'paragraph) (eq (org-element-type NODE) 'plain-text)) ;; check for plain text newly added descriptions
-    (let ((closest-hl-or-drawer (org-element-lineage-map NODE #'identity '('drawer 'headline) nil t)))
-      (unless (eq 'drawer (org-element-type closest-hl-or-drawer)) NODE))))
+  (when (and
+         ;; Is a paragraph element
+         (eq (org-element-type NODE) 'paragraph)
+         ;; Is directly under the PARENT headline
+         (eq (org-todoist--first-parent-of-type NODE 'headline) PARENT)
+         ;; Is not in a drawer
+         (not (eq (org-element-type (org-element-lineage-map NODE #'identity '('drawer 'headline) nil t)) 'drawer)))
+    NODE))
 
 (defun org-todoist--description-text (NODE)
   "Combines all paragraphs under NODE and returns the concatenated string"
