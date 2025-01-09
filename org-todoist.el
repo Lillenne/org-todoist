@@ -887,19 +887,22 @@ the wrong headline!"
     (when PARENT (org-element-adopt PARENT node))
     node))
 
+(defun org-todoist--make-description (DESCRIPTION)
+  (if (s-ends-with? "\n" DESCRIPTION) DESCRIPTION (concat DESCRIPTION "\n")))
+
 (defun org-todoist--add-description (NODE DESCRIPTION)
-  (org-element-adopt NODE (org-element-create 'plain-text nil DESCRIPTION))) ;; plain-text type also works?
+  (org-element-adopt NODE (org-element-create 'plain-text nil (org-todoist--make-description DESCRIPTION))))
 
 (defun org-todoist--replace-description (NODE DESCRIPTION)
   "Replaces the description of NODE with DESCRIPTION."
   (if DESCRIPTION
       (let ((comment (org-todoist--description-text NODE))
             (idx 0)) ;; Use idx to replace the first paragraph element
-        (unless (string-equal-ignore-case comment DESCRIPTION)
+        (unless (string-equal-ignore-case (s-trim comment) (s-trim DESCRIPTION)) ;; TODO trim necessary?
           ;; Replace the description
           (dolist (paragraph (org-todoist--get-description-elements NODE))
             (if (eql idx 0)
-                (org-element-set paragraph (org-element-create 'plain-text nil DESCRIPTION))
+                (org-element-set paragraph (org-element-create 'plain-text nil (org-todoist--make-description DESCRIPTION)))
               (org-element-extract paragraph))
             (cl-incf idx))
           (when (eql idx 0) (org-todoist--add-description NODE DESCRIPTION)) ;; There was no description, add the new one
