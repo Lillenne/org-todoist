@@ -231,47 +231,60 @@ this directory must be accessible on all PCs")
     (message (if OPEN "Syncing with todoist. Buffer will open when sync is complete..." "Syncing with todoist. This may take a moment..."))
     (url-retrieve org-todoist-sync-endpoint
                   (lambda (events open ast old cur-headline show-n-levels)
-                    (if (plist-member events :error)
-                        (progn (setq org-todoist--sync-err events)
-                               (message "Sync failed. See org-todoist--sync-err for details."))
-                      (let ((resp (progn (goto-char url-http-end-of-headers)
-                                         (decode-coding-region (point) (point-max) 'utf-8 t))))
-                        (when org-todoist-log-last-response
-                          (org-todoist--set-last-response resp)
-                          (setq org-todoist--last-response (json-read-from-string resp))))
-                      (org-todoist--parse-response org-todoist--last-response ast old)
-                      (org-todoist--handle-display cur-headline show-n-levels))
-                    (save-buffer)
-                    (message "Sync complete."))
+                    (if open
+                        (progn (org-todoist--do-sync-callback events open ast old cur-headline show-n-levels)
+                               (find-file (org-todoist-file))
+                               ;; (org-todoist--handle-display cur-headline show-n-levels)
+                               )
+                      (save-current-buffer (org-todoist--do-sync-callback events open ast old cur-headline show-n-levels))))
                   `(,OPEN ,ast ,old ,cur-headline ,show-n-levels)
                   'silent
                   'inhibit-cookies)))
 
+(defun org-todoist--do-sync-callback (events open ast old cur-headline show-n-levels)
+  (if (plist-member events :error)
+      (progn (setq org-todoist--sync-err events)
+             (message "Sync failed. See org-todoist--sync-err for details."))
+    (let ((resp (progn (goto-char url-http-end-of-headers)
+                       (decode-coding-region (point) (point-max) 'utf-8 t))))
+      (when org-todoist-log-last-response
+        (org-todoist--set-last-response resp)
+        (setq org-todoist--last-response (json-read-from-string resp))))
+    (org-todoist--parse-response org-todoist--last-response ast old)
+    (org-todoist--handle-display cur-headline show-n-levels)
+    (message "Sync complete.")))
+
+(defun org-todoist--get-todoist-buffer ()
+  (let* ((file (org-todoist-file))
+         (fb (find-buffer-visiting file)))
+    (if fb
+        fb
+      (find-file-noselect file))))
+
 (defun org-todoist--handle-display (cur-headline show-n-levels)
-  (unless show-n-levels (setq show-n-levels org-todoist-show-n-levels))
-  (find-file (org-todoist-file))
-  (save-buffer)
-  (if (< show-n-levels 1)
-      (org-content)
-    (org-content show-n-levels))
-  (org-fold-hide-drawer-all)
-  (let ((pos nil)
-        (inhibit-message t))
-    (org-map-entries (lambda ()
-                       (when (equal (org-entry-get nil "ITEM") cur-headline)
-                         (setq pos (point)))
-                       (when (equal (org-entry-get nil "collapsed") "t")
-                         (+org/close-fold))
-                       (when (equal (org-entry-get nil "is_archived") "t")
-                         (org-archive-subtree-default))
-                       (org-delete-property "collapsed")
-                       (org-delete-property "is_archived")))
-    (when cur-headline
-      (progn (when pos (goto-char pos))
-             (org-fold-show-context 'todoist)
-             ;; (+org/open-fold)
-             )))
-  (recenter))
+  (with-current-buffer (org-todoist--get-todoist-buffer)
+    (unless show-n-levels (setq show-n-levels org-todoist-show-n-levels))
+    (if (< show-n-levels 1)
+        (org-content)
+      (org-content show-n-levels))
+    (org-fold-hide-drawer-all)
+    (let ((pos nil)
+          (inhibit-message t))
+      (org-map-entries (lambda ()
+                         (when (equal (org-entry-get nil "ITEM") cur-headline)
+                           (setq pos (point)))
+                         (when (equal (org-entry-get nil "collapsed") "t")
+                           (+org/close-fold))
+                         (when (equal (org-entry-get nil "is_archived") "t")
+                           (org-archive-subtree-default))
+                         (org-delete-property "collapsed")
+                         (org-delete-property "is_archived")))
+      (write-file (org-todoist-file))
+      (if cur-headline
+          (progn (when pos (goto-char pos))
+                 (org-fold-show-context 'todoist)
+                 (recenter))
+        (goto-char (point-min))))))
 
 (defun org-todoist--first-parent-of-type (NODE TYPES)
   "Gets the first parent which is one of the given TYPES.
@@ -1192,8 +1205,8 @@ DEFAULT text."
 
 (defun org-todoist--update-file (AST)
   "Replaces the org-todoist file with the org representation AST"
-  (save-current-buffer
-    (find-file (org-todoist-file))
+  (with-current-buffer
+      (org-todoist--get-todoist-buffer)
     (erase-buffer)
     (insert (org-todoist-org-element-to-string AST))
     (save-buffer)))
@@ -1202,9 +1215,10 @@ DEFAULT text."
   "Parses the AST of the org-todoist-file"
   (save-current-buffer
     (let ((created (not (file-exists-p (org-todoist-file)))))
-      (find-file (org-todoist-file))
-      (when created (org-todoist--insert-header) (save-buffer))
-      (org-element-parse-buffer))))
+      (with-current-buffer (org-todoist--get-todoist-buffer)
+        (when created (org-todoist--insert-header)
+              (save-buffer))
+        (org-element-parse-buffer)))))
 
                                         ;Find node;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--find-node (QUERY AST)
