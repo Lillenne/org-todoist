@@ -239,6 +239,7 @@ this directory must be accessible on all PCs")
                           (setq org-todoist--last-response (json-read-from-string resp))))
                       (org-todoist--parse-response org-todoist--last-response ast old)
                       (org-todoist--handle-display cur-headline show-n-levels))
+                    (save-buffer)
                     (message "Sync complete."))
                   `(,OPEN ,ast ,old ,cur-headline ,show-n-levels)
                   'silent
@@ -382,6 +383,7 @@ the wrong headline!"
   (if (eq 'property-drawer (org-element-type DRAWER))
       ;; NOTE Having other drawers before property drawer makes property drawers parse as regular drawers. Avoid this.
       (if-let ((first-drawer (org-todoist--first-direct-descendent-of-type HL 'drawer)))
+          ;; assume drawers are in front of description elements
           (org-element-insert-before DRAWER first-drawer)
         (org-todoist--adopt-drawer-regular HL DRAWER))
     (org-todoist--adopt-drawer-regular HL DRAWER)))
@@ -416,7 +418,7 @@ the wrong headline!"
        (equal (org-element-property :minute-start T1) (org-element-property :minute-start T2))))
 
 (defun org-todoist--get-labels (TAGS)
-  (--filter (string= org-archive-tag it) TAGS))
+  (--filter (not (string= org-archive-tag it)) TAGS))
 
 (defun org-todoist--get-section-id-position-non-default (HL)
   "Use this when pushing updates (we don't want to send id=default) to Todoist."
@@ -443,8 +445,7 @@ the wrong headline!"
                (eff (when effstr (org-duration-to-minutes effstr)))
                (tags (org-element-property :tags hl))
                (isarchived (member org-archive-tag tags))
-               (labels tags)
-               ;; (labels (org-todoist--get-labels tags))
+               (labels (org-todoist--get-labels tags))
                (proj (org-todoist--get-project-id-position hl))
                (section (org-todoist--get-section-id-position-non-default hl))
                (parenttask (org-todoist--get-task-id-position hl))
@@ -467,8 +468,7 @@ the wrong headline!"
                (oldeffstr (org-todoist--get-prop oldtask "EFFORT"))
                (oldeff (when oldeffstr (org-duration-to-minutes oldeffstr)))
                (oldtags (org-element-property :tags oldtask))
-               (oldlabels oldtags)
-               ;; (oldlabels (org-todoist--get-labels oldtags))
+               (oldlabels (org-todoist--get-labels oldtags))
                (oldisarchived (member org-archive-tag oldtags))
                (oldrid (org-element-property :RESPONSIBLE_UID oldtask))
                (oldcomments (org-todoist--get-comments-text oldtask))
