@@ -6,7 +6,7 @@
 ;; Maintainer: Austin Kearns <59812315+Lillenne@users.noreply.github.com>
 ;; Created: September 15, 2024
 ;; Modified: September 15, 2024
-;; Version: 0.0.2
+;; Version: 0.0.1
 ;; Keywords: calendar org todoist
 ;; Homepage: https://github.com/lillenne/org-todoist
 ;; Package-Requires: ((emacs "29.1") (s "1.13.1") (org "9.4") (ts "0.3") (dash "2.19.1") (json "1.5"))
@@ -336,7 +336,7 @@ TYPES can be a single symbol or a list of symbols."
 
 (defun org-todoist--add-repeater (TIMESTAMP STRING)
   ;; TODO more repeater cases https://todoist.com/help/articles/introduction-to-recurring-due-dates-YUYVJJAV
-  (let ((match (s-match ".*\\([0-9]*\\) \\([week|day|month|hour]+\\)" STRING)))
+  (let ((match (s-match ".*\\([0-9]+\\) \\([week|day|month|hour]+\\)" STRING)))
     (when match
       (org-element-put-property TIMESTAMP :repeater-type (if (s-contains? "!" STRING) 'restart 'cumulate))
       (org-element-put-property TIMESTAMP :repeater-unit (intern (nth 2 match)))

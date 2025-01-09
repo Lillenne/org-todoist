@@ -216,6 +216,12 @@ More description
     (org-todoist--put-node-attribute hl "testattr" "MYVAL")
     (should (string-equal (org-todoist--get-node-attribute hl "testattr") "MYVAL"))))
 
+(ert-deftest org-todoist--test--repeater-regex ()
+  (let ((ts (org-element-create 'timestamp))
+        (str "every! mon, tues, wed, thurs"))
+    (org-todoist--add-repeater ts str)
+    (should (not (org-element-property :repeater-type ts)))))
+
 (ert-deftest org-todoist--test--get-prop ()
   "Retrieves the property KEY from the property drawer directly under node.
 Returns nil if not present"
