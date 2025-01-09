@@ -15,7 +15,8 @@
 ;;
 ;;; Commentary:
 ;;
-;;  Syncs Todoist tasks to org mode
+;; An Emacs package for bidirectional incremental sync of Org Mode elements with Todoist using org
+;; exactly how you normally would in Emacs Org Mode.
 ;;
 ;;; Code:
 
@@ -1071,15 +1072,17 @@ timestamp"
     (if (stringp val) (string-to-number val) val)))
 
 (defun org-todoist--sort-by-child-order (NODE PROPERTY &optional TYPE)
-  (let* ((children (org-element-map NODE 'headline
-                     (lambda (hl) (when (and (eq (org-todoist--first-parent-of-type hl 'headline) NODE)
-                                             (org-todoist--get-prop hl PROPERTY) ;; only move children with the property
-                                             (or (not TYPE)
-                                                 (string= (org-todoist--get-todoist-type hl) TYPE)))
-                                    hl))))
-         (sorted (cl-sort children (lambda (a b) (< (org-todoist--get-position a PROPERTY) (org-todoist--get-position b PROPERTY))))))
-    (dolist (child sorted)
-      (org-element-adopt NODE (org-element-extract child)))))
+  nil
+  ;; (let* ((children (org-element-map NODE 'headline
+  ;;                    (lambda (hl) (when (and (eq (org-todoist--first-parent-of-type hl 'headline) NODE)
+  ;;                                            (org-todoist--get-prop hl PROPERTY) ;; only move children with the property
+  ;;                                            (or (not TYPE)
+  ;;                                                (string= (org-todoist--get-todoist-type hl) TYPE)))
+  ;;                                   hl))))
+  ;;        (sorted (cl-sort children (lambda (a b) (< (org-todoist--get-position a PROPERTY) (org-todoist--get-position b PROPERTY))))))
+  ;;   (dolist (child sorted)
+  ;;     (org-element-adopt NODE (org-element-extract child))))
+  )
 
 (defun org-todoist--set-effort (NODE TASK)
   (when-let* ((duration (assoc-default 'duration TASK))
