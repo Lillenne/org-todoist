@@ -23,6 +23,7 @@
 (require 's)
 (require 'org)
 (require 'org-capture)
+(require 'org-element)
 (require 'ts)
 (require 'dash)
 (require 'json)
@@ -1131,8 +1132,10 @@ timestamp"
 (defun org-todoist--add-tag (NODE TAG)
   "Adds a TAG to a NODE"
   (let ((tags (org-element-property :tags NODE)))
-    (unless (member TAG tags)
-      (push TAG tags))))
+    (if (null tags)
+        (org-element-put-property NODE :tags `(,TAG))
+      (unless (member TAG tags)
+        (push TAG tags)))))
 
 (defun org-todoist--archive (NODE)
   "Archives NODE via tag"
