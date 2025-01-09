@@ -118,31 +118,44 @@ this directory must be accessible on all PCs")
 (defvar org-todoist--last-request nil "The last request body, if any and org-todoist-log-last-request is non-nil.")
 (defvar org-todoist-log-last-response t)
 (defvar org-todoist--last-response nil "The last parsed response, if any and org-todoist-log-last-response is non-nil.")
+
 (defun org-todoist--set-last-response (JSON)
-  (with-file! (org-todoist--storage-file "PREVIOUS.json") (insert JSON)))
-(defun org-todoist--storage-file (FILE) (concat (file-name-as-directory org-todoist-storage-dir) FILE))
+  (with-temp-file (org-todoist--storage-file "PREVIOUS.json")
+    (insert JSON)))
+
+(defun org-todoist--storage-file (FILE) (expand-file-name FILE org-todoist-storage-dir))
+
 (defun org-todoist--set-sync-token (TOKEN)
-  (with-file! (org-todoist--storage-file org-todoist--sync-token-file) (insert TOKEN)))
+  (let ((file (org-todoist--storage-file org-todoist--sync-token-file)))
+    (with-temp-file file
+      (when (file-exists-p file)
+        (insert-file-contents file))
+      (insert TOKEN)
+      (insert "\n"))))
+
 (defun org-todoist--get-sync-token ()
   (if (file-exists-p (org-todoist--storage-file org-todoist--sync-token-file))
-      (let ((res (with-file-contents! (org-todoist--storage-file org-todoist--sync-token-file) (get-last-line))))
+      (let ((res (with-temp-buffer
+                   (insert-file-contents (org-todoist--storage-file org-todoist--sync-token-file))
+                   (goto-char (point-max))
+                   (forward-line -1)
+                   (thing-at-point 'line t))))
         (if res res "*"))
     "*"))
 
-(defun org-todoist--set-last-sync-buffer (AST) (with-file! (org-todoist--storage-file org-todoist--sync-buffer-file) (erase-buffer) (org-mode) (insert (org-todoist-org-element-to-string AST))))
+(defun org-todoist--set-last-sync-buffer (AST)
+  (with-temp-file (org-todoist--storage-file org-todoist--sync-buffer-file)
+    (org-mode)
+    (insert (org-todoist-org-element-to-string AST))))
+
 (defun org-todoist--get-last-sync-buffer-ast ()
-  (let* ((fn (org-todoist--storage-file org-todoist--sync-buffer-file))
-         (existed (file-exists-p fn))
-         (buf (find-file-noselect fn))) ;; create buffer. Will be used later in chain
-    (when existed
-      (save-window-excursion (find-file fn)
-                             ;; (with-current-buffer buf ;;not sure why this doesn't work
-                             (org-mode)
-                             (org-element-parse-buffer)))))
-(defun get-last-line ()
-  (save-excursion
-    (goto-char (point-max))
-    (thing-at-point 'line t)))
+  (let ((file (org-todoist--storage-file org-todoist--sync-buffer-file)))
+    (when (file-exists-p file)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (org-mode)
+        (org-element-parse-buffer)))))
+
 
 (defun org-todoist--get-comments (HEADLINE)
   (org-element-map HEADLINE 'item (lambda (item) (when (and (eq (org-todoist--first-parent-of-type item 'headline) HEADLINE)
@@ -150,30 +163,21 @@ this directory must be accessible on all PCs")
                                                    item))))
 
 (defun org-todoist--is-note (ITEM)
-  "NOTE must be on the org buffer"
   (s-contains? "Note" (org-todoist--item-text ITEM)))
 
 (defun org-todoist--item-text (ITEM)
-  ;; TODO May want to always user org-element-to-string since it doesn't require the buffer. Don't remember about including / excluding bullets
-  (if (and (org-element-contents-begin ITEM) (org-element-contents-end ITEM))
-      (buffer-substring-no-properties (org-element-contents-begin ITEM) (org-element-contents-end ITEM))
-    (org-todoist-org-element-to-string ITEM)))
+  (org-todoist-org-element-to-string ITEM))
 
 (defun org-todoist--note-text (ITEM)
-  "NOTE must be on the org buffer"
   (let ((text (org-todoist--item-text ITEM)))
     (when (s-contains? "Note taken on [" text) (s-trim-right (s-join "\n" (--map (s-trim it) (cdr (s-lines text))))))))
 
-(defun org-todoist--get-comments-text (HEADLINE &optional FILE)
-  "NOTE must be on the org buffer or specify buffer as FILE"
-  (if FILE
-      ;; (with-current-buffer (find-file-noselect FILE) (--map (org-todoist--note-text it) (org-todoist--get-comments HEADLINE))) ;; TODO why does this not work
-      (save-window-excursion (find-file FILE) (--map (org-todoist--note-text it) (org-todoist--get-comments HEADLINE)))
-    (--map (org-todoist--note-text it) (org-todoist--get-comments HEADLINE))))
+(defun org-todoist--get-comments-text (HEADLINE)
+  (--map (org-todoist--note-text it) (org-todoist--get-comments HEADLINE)))
 
                                         ;API Requests;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--select-user (TEXT)
-  (if-let* ((ast (org-todoist--file-ast));; TODO cache?
+  (if-let* ((ast (org-todoist--file-ast)) ;; TODO cache?
             (userelements (org-element-map (org-todoist--user-node ast) 'headline
                             (lambda (node) (when (org-todoist--node-type-query node org-todoist--collaborator-type) node))))
             (usernames (--map (org-element-property :raw-value it) userelements))
@@ -228,23 +232,14 @@ this directory must be accessible on all PCs")
                     (if (plist-member events :error)
                         (progn (setq org-todoist--sync-err events)
                                (message "Sync failed. See org-todoist--sync-err for details."))
-                      (let ((resp (with-current-buffer (current-buffer)
-                                    (goto-char url-http-end-of-headers)
-                                    (decode-coding-region (point) (point-max) 'utf-8 t))))
-                        (save-window-excursion
-                          (when org-todoist-log-last-response
-                            (org-todoist--set-last-response resp)
-                            (setq org-todoist--last-response (json-read-from-string resp)))
-                          (org-todoist--parse-response org-todoist--last-response ast old)
-                          (unless open
-                            (org-todoist--handle-display cur-headline show-n-levels)))
-                        (when (get-buffer org-todoist--sync-buffer-file)
-                          (kill-buffer org-todoist--sync-buffer-file))
-                        ;; (when (and (get-buffer org-todoist-file) (not open)) ;; TODO probably shouldn't kill the buffer if it was open before we opened it, but not tracking
-                        ;;   (kill-buffer org-todoist-file))
-                        (when open
-                          (org-todoist--handle-display cur-headline show-n-levels))
-                        (message "Sync complete."))))
+                      (let ((resp (progn (goto-char url-http-end-of-headers)
+                                         (decode-coding-region (point) (point-max) 'utf-8 t))))
+                        (when org-todoist-log-last-response
+                          (org-todoist--set-last-response resp)
+                          (setq org-todoist--last-response (json-read-from-string resp))))
+                      (org-todoist--parse-response org-todoist--last-response ast old)
+                      (org-todoist--handle-display cur-headline show-n-levels))
+                    (message "Sync complete."))
                   `(,OPEN ,ast ,old ,cur-headline ,show-n-levels)
                   'silent
                   'inhibit-cookies)))
@@ -430,9 +425,7 @@ the wrong headline!"
       res)))
 
 (defun org-todoist--push (ast old)
-  (let ((commands nil)
-        (curfile (org-todoist-file))
-        (oldfile (org-todoist--storage-file org-todoist--sync-buffer-file)))
+  (let ((commands nil))
     (org-element-map ast 'headline
       (lambda (hl)
         ;; TODO would be easier as oop, need to learn lisp oop
@@ -457,7 +450,7 @@ the wrong headline!"
                (parenttask (org-todoist--get-task-id-position hl))
                (rid (org-element-property :RESPONSIBLE_UID hl))
                (is-recurring (org-todoist--task-is-recurring hl))
-               (comments (org-todoist--get-comments-text hl curfile))
+               (comments (org-todoist--get-comments-text hl))
                (lr (org-element-property :LAST_REPEAT hl))
                (last-repeat (when (and lr is-recurring) (org-timestamp-from-string lr)))
                (oldtask (org-todoist--get-by-id nil id old))
@@ -478,7 +471,7 @@ the wrong headline!"
                ;; (oldlabels (org-todoist--get-labels oldtags))
                (oldisarchived (member org-archive-tag oldtags))
                (oldrid (org-element-property :RESPONSIBLE_UID oldtask))
-               (oldcomments (org-todoist--get-comments-text oldtask oldfile))
+               (oldcomments (org-todoist--get-comments-text oldtask))
                )
 
           ;; new object. Create temp id
@@ -725,7 +718,7 @@ the wrong headline!"
     (org-todoist--update-projects projects AST)
     (org-todoist--update-sections sections AST)
     (org-todoist--update-tasks tasks AST)
-    (org-todoist--update-comments comments AST (org-todoist-file))
+    (org-todoist--update-comments comments AST)
     (org-todoist--set-sync-token token)
     (org-todoist--set-last-sync-buffer AST)
     (org-todoist--update-file AST)))
@@ -740,11 +733,11 @@ the wrong headline!"
             (org-todoist--insert-id hl (cdr elem)))))
       nil t)))
 
-(defun org-todoist--update-comments (COMMENTS AST FILE)
+(defun org-todoist--update-comments (COMMENTS AST)
   (cl-loop for comment across COMMENTS do
            ;; TODO support comment IDs and add/update/delete
            (let* ((task (org-todoist--get-by-id org-todoist--task-type (assoc-default 'item_id comment) AST))
-                  (comments (org-todoist--get-comments-text task FILE))
+                  (comments (org-todoist--get-comments-text task))
                   (text (assoc-default 'content comment)))
              (unless (member text comments)
                (org-todoist--log-drawer-add-note task (assoc-default 'content comment) (assoc-default 'posted_at comment)))
@@ -753,12 +746,11 @@ the wrong headline!"
 
 (defun org-todoist--insert-header ()
   ;; TODO use element api
-  (save-excursion
-    (goto-char (point-min))
-    (insert "#+title: Todoist
+  (goto-char (point-min))
+  (insert "#+title: Todoist
 #+STARTUP: logdone
 #+STARTUP: logdrawer
-")))
+"))
 
 
 ;; (section
@@ -1124,10 +1116,10 @@ timestamp"
       (setq root next))
     root))
 
-(defun org-todoist--assign (NODE ID AST)
-  (let* ((user (org-todoist--get-by-id org-todoist--collaborator-type ID AST))
-         (name (org-todoist--get-prop user "full_name")))
-    (org-todoist--add-tag NODE (concat  "@" (string-replace " " "_" name)))))
+;; (defun org-todoist--assign (NODE ID AST)
+;;   (let* ((user (org-todoist--get-by-id org-todoist--collaborator-type ID AST))
+;;          (name (org-todoist--get-prop user "full_name")))
+;;     (org-todoist--add-tag NODE (concat  "@" (string-replace " " "_" name)))))
 
 (defun org-todoist--add-tag (NODE TAG)
   "Adds a TAG to a NODE"
@@ -1172,19 +1164,18 @@ DEFAULT text."
 
 (defun org-todoist--update-file (AST)
   "Replaces the org-todoist file with the org representation AST"
-  (save-window-excursion (if (not (file-exists-p (org-todoist-file)))
-                             (create-file-buffer (org-todoist-file)))
-                         (find-file (org-todoist-file))
-                         (erase-buffer)
-                         (insert (org-todoist-org-element-to-string AST))
-                         (save-buffer)))
+  (save-current-buffer
+    (find-file (org-todoist-file))
+    (erase-buffer)
+    (insert (org-todoist-org-element-to-string AST))
+    (save-buffer)))
 
 (defun org-todoist--file-ast ()
   "Parses the AST of the org-todoist-file"
-  (save-window-excursion
+  (save-current-buffer
     (let ((created (not (file-exists-p (org-todoist-file)))))
       (find-file (org-todoist-file))
-      (when created (erase-buffer) (org-todoist--insert-header))
+      (when created (org-todoist--insert-header) (save-buffer))
       (org-element-parse-buffer))))
 
                                         ;Find node;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
