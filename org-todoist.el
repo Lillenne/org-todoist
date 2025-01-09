@@ -118,6 +118,7 @@ this directory must be accessible on all PCs")
 (defvar org-todoist--last-request nil "The last request body, if any and org-todoist-log-last-request is non-nil.")
 (defvar org-todoist-log-last-response t)
 (defvar org-todoist--last-response nil "The last parsed response, if any and org-todoist-log-last-response is non-nil.")
+(defvar org-todoist-keep-old-sync-tokens nil)
 
 (defun org-todoist--set-last-response (JSON)
   (with-temp-file (org-todoist--storage-file "PREVIOUS.json")
@@ -128,7 +129,7 @@ this directory must be accessible on all PCs")
 (defun org-todoist--set-sync-token (TOKEN)
   (let ((file (org-todoist--storage-file org-todoist--sync-token-file)))
     (with-temp-file file
-      (when (file-exists-p file)
+      (when (and org-todoist-keep-old-sync-tokens (file-exists-p file))
         (insert-file-contents file))
       (insert TOKEN)
       (insert "\n"))))
@@ -1024,12 +1025,16 @@ timestamp"
                (org-todoist--set-priority task (assoc-default 'priority data))
                (org-todoist--set-todo task (assoc-default 'checked data) (assoc-default 'is_deleted data))))) ;; TODO checked vs is_archived?
   ;; second loop to set parent tasks after all have been created
-  (cl-loop for data across TASKS do
-           (when-let* ((parenttaskid (assoc-default 'parent_id data))
-                       (task (org-todoist--get-by-id org-todoist--task-type (assoc-default 'id data) AST))
-                       (parenttask (org-todoist--get-by-id org-todoist--task-type parenttaskid AST))
-                       (wrong-spot (not (cl-equalp parenttaskid (org-todoist--get-task-id-position task)))))
-             (org-element-adopt parenttask (org-element-put-property (org-element-extract task) :level (+ 1 (org-element-property :level parenttask)))))))
+  (let ((with-child nil)) ;; Only sort child tasks on the first go around. If you move it, you probably moved it for a reason?
+    (cl-loop for data across TASKS do
+             (when-let* ((parenttaskid (assoc-default 'parent_id data))
+                         (task (org-todoist--get-by-id org-todoist--task-type (assoc-default 'id data) AST))
+                         (parenttask (org-todoist--get-by-id org-todoist--task-type parenttaskid AST))
+                         (wrong-spot (not (cl-equalp parenttaskid (org-todoist--get-task-id-position task)))))
+               (push parenttask with-child)
+               (org-element-adopt parenttask (org-element-put-property (org-element-extract task) :level (+ 1 (org-element-property :level parenttask))))))
+    (dolist (parent with-child)
+      (org-todoist--sort-by-child-order parent "child_order"))))
 
 (defun org-todoist--list-headlines ()
   (let ((headlines nil))
