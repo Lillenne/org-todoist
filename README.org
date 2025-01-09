@@ -24,7 +24,7 @@ An *Emacs package for bidirectional incremental sync* of [[https://orgmode.org/]
 - CRUD[fn:1] new projects
 - Refile tasks and sections to other sections and projects
 
-/Org Todoist also supports collaboration with other users/ via assigning tasks and notifications.
+Org Todoist also /supports collaboration with other users/ via assigning tasks and notifications.
 
 ** How it works
 Commands are automatically detected and batched by diffing the current ~org-todoist-file~ with the abstract syntax tree from a snapshot of the previous sync and nodes are updated in place using a single asynchronous request, meaning /metadata (such as time tracking information and additional properties) is retained/.
@@ -40,6 +40,16 @@ Syncing is done using the [[https://developer.todoist.com/sync/v9/#overview][Tod
 
 *Local changes will overwrite remote changes!*
 
+** Org capture to a Todoist project section
+/Captures will automatically sync by default/ via the ~org-capture-finalize-hook~.
+
+Sample capture template:
+#+begin_src emacs-lisp
+(setq org-capture-templates
+      `(("i" "Inbox" entry
+         (file+olp ,(org-todoist-file) ,org-todoist-project-headline "Inbox" "Default")
+         "* TODO %? %^G %^{EFFORT}p \nSCHEDULED: %^t"))
+#+end_src
 ** Collaboration
 #+begin_src emacs-lisp
 (org-todoist-assign-task)
@@ -48,19 +58,14 @@ Syncing is done using the [[https://developer.todoist.com/sync/v9/#overview][Tod
 #+end_src
 
 [[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/assign.png]]
-** Org capture to a Todoist project section
-/Captures will automatically sync by default/ via the ~org-capture-finalize-hook~.
-
-Sample capture template:
-#+begin_src emacs-lisp
-(setq org-capture-templates
-      `(("i" "Inbox" entry (file+olp ,(org-todoist-file) ,org-todoist-project-headline "Inbox" "Default") "* TODO %? %^G %^{EFFORT}p \nSCHEDULED: %^t"))
-#+end_src
 ** (Currently) unsupported features
 [X] = Implemented
+
 [-] = WIP or implemented with caveats
+
 [ ] = Not currently supported
 
+- [ ] Subprojects
 - [-] Essential task items
   - [-] Recurring tasks[fn:2]
   - [ ] Quick add
@@ -116,7 +121,7 @@ Todoist fills these gaps and, more importantly, my wife uses it.
 There is currently [[https://github.com/abrochard/emacs-todoist][another great integration]] for org-mode and todoist, but it takes a fundamentally different approach (stateless on-demand regeneration using many requests with the [[https://developer.todoist.com/rest/v2/#overview][REST API]] vs stateful syncing with a single request to the [[https://developer.todoist.com/sync/v9/#overview][sync API]] that can be queried by [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly]] on mobile and buffer creation with org.el vs [[https://orgmode.org/worg/dev/org-element-api.html][org-element-api]]).
 
 * Contributing, Issues, and Feature Request
-Feel free to submit an [[https://github.com/Lillenne/org-todoist/issues/new][issue or feature request]]! When submitting issues *please see the [[Troubleshooting][troubleshooting]] section and attach the response json (or at least the error information). I'll do my best to address issues timely and evaluate feature additions. I work full time and have two very young (0-3) boys, so if there is a feature you want to add please feel free to submit a PR yourself!
+Feel free to submit an [[https://github.com/Lillenne/org-todoist/issues/new][issue or feature request]]! When submitting issues *please see the [[Troubleshooting][troubleshooting]] section and attach the response json (or at least the error information)*. I'll do my best to address issues timely and evaluate feature additions. I work full time and have two very young (0-3) boys, so if there is a feature you want to add please feel free to submit a PR yourself!
 
 My personal test API call data is included in the repo to show the API return format and help my own development but is protected with [[https://github.com/getsops/sops][sops]]. If you need data for any reason, please use your own.
 
