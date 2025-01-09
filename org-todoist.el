@@ -85,7 +85,7 @@ this directory must be accessible on all PCs")
 (defconst org-todoist--sync-areas ["collaborators", "projects", "items", "sections"] "The types of Todoist items to sync.")
 
 (defconst org-todoist--project-skip-list '(name can_assign_tasks color is_deleted is_favorite is_frozen sync_id v2_id v2_parent_id view_style))
-(defconst org-todoist--section-skip-list '(name sync_id updated_at is_deleted v2_id v2_project_id archived_at section_order))
+(defconst org-todoist--section-skip-list '(name sync_id updated_at is_deleted v2_id v2_project_id archived_at))
 (defconst org-todoist--task-skip-list '(name completed_at is_deleted content duration description checked deadline due labels priority project_id section_id sync_id v2_id v2_parent_id v2_project_id v2_section_id completed_at content day_order))
 (defconst org-todoist--sync-token-file "SYNC-TOKEN")
 (defconst org-todoist--sync-buffer-file "SYNC-BUFFER")
@@ -1059,17 +1059,15 @@ timestamp"
     (if (stringp val) (string-to-number val) val)))
 
 (defun org-todoist--sort-by-child-order (NODE PROPERTY &optional TYPE)
-  nil
-  ;; (let* ((children (org-element-map NODE 'headline (lambda (hl) (when
-  ;;                                                                   (and (eq (org-element-parent hl) NODE)
-  ;;                                                                        (org-todoist--get-prop hl PROPERTY)
-  ;;                                                                        (or (not TYPE)
-  ;;                                                                            (equal (org-todoist--get-todoist-type hl) TYPE))) hl))))
-  ;;        (sorted (cl-sort children (lambda (a b) (< (org-todoist--get-position a PROPERTY) (org-todoist--get-position b PROPERTY))))))
-  ;;   (dolist (child sorted)
-  ;;     (org-element-adopt NODE (org-element-extract child))))
-  ;; TODO not rearranging sections. Revisted: probably from direct parent requirement when sections may be in e.g. a section org element?
-  )
+  (let* ((children (org-element-map NODE 'headline
+                     (lambda (hl) (when (and (eq (org-todoist--first-parent-of-type hl 'headline) NODE)
+                                             (org-todoist--get-prop hl PROPERTY) ;; only move children with the property
+                                             (or (not TYPE)
+                                                 (string= (org-todoist--get-todoist-type hl) TYPE)))
+                                    hl))))
+         (sorted (cl-sort children (lambda (a b) (< (org-todoist--get-position a PROPERTY) (org-todoist--get-position b PROPERTY))))))
+    (dolist (child sorted)
+      (org-element-adopt NODE (org-element-extract child)))))
 
 (defun org-todoist--set-effort (NODE TASK)
   (when-let* ((duration (assoc-default 'duration TASK))
@@ -1138,9 +1136,9 @@ timestamp"
   (org-element-map NODE t #'org-todoist--is-description-element nil nil 'drawer))
 
 (defun org-todoist--is-description-element (NODE)
-  "t if the NODE is a paragraph element and is not in a drawer."
+  "t if the NODE is a paragraph or plain-text element and is not in a drawer."
   ;; TODO this doesn't seem to be working properly. Doesn't filter out items in drawers.
-  (when (eq (org-element-type NODE) 'paragraph)
+  (when (or (eq (org-element-type NODE) 'paragraph) (eq (org-element-type NODE) 'plain-text)) ;; check for plain text newly added descriptions
     (let ((closest-hl-or-drawer (org-element-lineage-map NODE #'identity '('drawer 'headline) nil t)))
       (unless (eq 'drawer (org-element-type closest-hl-or-drawer)) NODE))))
 
