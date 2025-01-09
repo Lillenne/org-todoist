@@ -419,6 +419,16 @@ the wrong headline!"
        (equal (org-element-property :hour-start T1) (org-element-property :hour-start T2))
        (equal (org-element-property :minute-start T1) (org-element-property :minute-start T2))))
 
+(defun org-todoist--get-tags (NODE)
+  (let ((all-tags nil))
+    (org-element-lineage-map NODE
+        (lambda (hl) (let ((tags (org-element-property :tags hl)))
+                       (when tags
+                         (dolist (tag tags)
+                           (cl-pushnew tag all-tags)))))
+      'headline t)
+    all-tags))
+
 (defun org-todoist--get-labels (TAGS)
   (--filter (not (string= org-archive-tag it)) TAGS))
 
@@ -445,7 +455,7 @@ the wrong headline!"
                (dead (org-element-property :deadline hl))
                (effstr (org-todoist--get-prop hl "EFFORT"))
                (eff (when effstr (org-duration-to-minutes effstr)))
-               (tags (org-element-property :tags hl))
+               (tags (org-todoist--get-tags hl))
                (isarchived (member org-archive-tag tags))
                (labels (org-todoist--get-labels tags))
                (proj (org-todoist--get-project-id-position hl))
@@ -469,7 +479,7 @@ the wrong headline!"
                (olddead (org-element-property :deadline oldtask))
                (oldeffstr (org-todoist--get-prop oldtask "EFFORT"))
                (oldeff (when oldeffstr (org-duration-to-minutes oldeffstr)))
-               (oldtags (org-element-property :tags oldtask))
+               (oldtags (org-todoist--get-tags oldtask))
                (oldlabels (org-todoist--get-labels oldtags))
                (oldisarchived (member org-archive-tag oldtags))
                (oldrid (org-element-property :RESPONSIBLE_UID oldtask))
