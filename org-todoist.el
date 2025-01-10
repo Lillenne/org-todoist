@@ -60,6 +60,12 @@ visibility of the item at pos.
 (defvar org-todoist-todo-keyword "TODO" "TODO keyword for active Todoist tasks.")
 (defvar org-todoist-done-keyword "DONE" "TODO keyword for completed Todoist tasks.")
 (defvar org-todoist-deleted-keyword "CANCELED" "TODO keyword for deleted Todoist tasks.")
+(defvar org-todoist-comment-tag-user-pretty nil
+  "Whether tagging users in comments should be pretty.
+
+If non-nil use the org link representation for the comment tag so it
+looks nice when viewed in org mode. Else use the Todoist markdown representation
+so it looks nice in the Todoist app.")
 
 (defvar org-todoist-storage-dir (concat (file-name-as-directory (xdg-cache-home)) "org-todoist")
   "The directory for org-todoist storage.
@@ -451,6 +457,22 @@ the wrong headline!"
     (unless (string= res org-todoist--default-id)
       res)))
 
+(defun org-todoist--get-notify-ids (STRING)
+  (--map (cadr it) (s-match-strings-all "todoist-mention://\\([0-9]+\\)" STRING)))
+
+(defun org-todoist--get-note-add (id comment)
+  (let ((args `(("item_id" . ,id) ;; task uuid/tempid
+                ("content" . ,comment)))
+        (matches (org-todoist--get-notify-ids comment)))
+
+    (when matches
+      (push `("uids_to_notify" . ,matches) args))
+
+    `(("uuid" . ,(org-id-uuid)) ;; command uuid
+      ("type" . "note_add")
+      ("temp_id". ,(org-id-uuid)) ;; note uuid
+      ("args" . ,args))))
+
 (defun org-todoist--push (ast old)
   (let ((commands nil))
     (org-element-map ast 'headline
@@ -528,23 +550,14 @@ the wrong headline!"
                        (when comments
                          ;; Add comments
                          (dolist (comment comments)
-                           (push `(("uuid" . ,(org-id-uuid)) ;; command uuid
-                                   ("type" . "note_add")
-                                   ("temp_id". ,(org-id-uuid)) ;; note uuid
-                                   ("args" . (("item_id" . ,id) ;; task uuid/tempid
-                                              ("content" . ,comment))))
-                                 commands))))
+                           (push (org-todoist--get-note-add id comment) commands))))
+
                    ;; when is somewhat redundant, as oldtask should not be null if there is a tid (new item)
                    (when oldtask
                      (unless (equal comments oldcomments)
                        ;; TODO support comment editing. This will push any edited comments as new comments
                        (dolist (comment (--filter (not (member it oldcomments)) comments))
-                         (push `(("uuid" . ,(org-id-uuid)) ;; command uuid
-                                 ("type" . "note_add")
-                                 ("temp_id". ,(org-id-uuid)) ;; note uuid
-                                 ("args" . (("item_id" . ,id) ;; task uuid/tempid
-                                            ("content" . ,comment))))
-                               commands)))
+                         (push (org-todoist--get-note-add id comment) commands)))
 
                      ;; item_move. Only one parameter can be specified
                      (unless (and (string= section oldsection)
@@ -1446,7 +1459,9 @@ NODE unless they are in plist SKIP. RETURNS the mutated NODE."
 (defun org-todoist-tag-user ()
   (interactive)
   (when-let ((selectedelement (org-todoist--select-user "Tag: ")))
-    (insert (concat "@" (org-element-property :raw-value selectedelement)))))
+    (if org-todoist-comment-tag-user-pretty
+        (insert (concat "[[" (org-element-property :raw-value selectedelement) "][todoist-mention://" (org-todoist--id-or-temp-id selectedelement) "]"))
+      (insert (concat "[" (org-element-property :raw-value selectedelement) "](todoist-mention://" (org-todoist--id-or-temp-id selectedelement) ")")))))
 
 (defun org-todoist-assign-task ()
   (interactive)
