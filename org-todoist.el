@@ -91,9 +91,9 @@ this directory must be accessible on all PCs")
 (defconst org-todoist--project-node-type "PROJECT_HEADLINE" "The org-todoist--type value for the project root node.")
 (defconst org-todoist--sync-areas ["collaborators", "projects", "items", "sections"] "The types of Todoist items to sync.")
 
-(defconst org-todoist--project-skip-list '(name can_assign_tasks color is_deleted is_favorite is_frozen sync_id v2_id v2_parent_id view_style))
-(defconst org-todoist--section-skip-list '(name sync_id updated_at is_deleted v2_id v2_project_id archived_at))
-(defconst org-todoist--task-skip-list '(name completed_at is_deleted content duration description checked deadline due labels priority project_id section_id sync_id v2_id v2_parent_id v2_project_id v2_section_id completed_at content day_order))
+(defconst org-todoist--project-skip-list '(name can_assign_tasks color is_deleted is_favorite is_frozen sync_id v2_id v2_parent_id view_style collapsed))
+(defconst org-todoist--section-skip-list '(name sync_id updated_at is_deleted v2_id v2_project_id archived_at collapsed))
+(defconst org-todoist--task-skip-list '(name completed_at is_deleted content duration description checked deadline due labels priority project_id section_id sync_id v2_id v2_parent_id v2_project_id v2_section_id completed_at content day_order collapsed))
 (defconst org-todoist--sync-token-file "SYNC-TOKEN")
 (defconst org-todoist--sync-buffer-file "SYNC-BUFFER")
 
@@ -278,13 +278,7 @@ this directory must be accessible on all PCs")
           (inhibit-message t))
       (org-map-entries (lambda ()
                          (when (equal (org-entry-get nil "ITEM") cur-headline)
-                           (setq pos (point)))
-                         (when (equal (org-entry-get nil "collapsed") "t")
-                           (+org/close-fold))
-                         (when (equal (org-entry-get nil "is_archived") "t")
-                           (org-archive-subtree-default))
-                         (org-delete-property "collapsed")
-                         (org-delete-property "is_archived")))
+                           (setq pos (point)))))
       (write-file (org-todoist-file))
       (if cur-headline
           (progn (when pos (goto-char pos))
@@ -486,7 +480,7 @@ the wrong headline!"
                (title (org-element-property :raw-value hl))
                (desc (org-todoist--description-text hl))
                (sch (org-element-property :scheduled hl))
-               (pri (org-element-property :priority hl))
+               (pri (org-todoist--get-priority hl))
                (dead (org-element-property :deadline hl))
                (effstr (org-todoist--get-prop hl "EFFORT"))
                (eff (when effstr (org-duration-to-minutes effstr)))
@@ -509,7 +503,7 @@ the wrong headline!"
                (old-todo-kw (org-element-property :todo-keyword oldtask))
                (oldtitle (org-element-property :raw-value oldtask))
                (olddesc (org-todoist--description-text oldtask))
-               (oldpri (org-element-property :priority oldtask))
+               (oldpri (org-todoist--get-priority oldtask))
                (oldsch (org-element-property :scheduled oldtask))
                (olddead (org-element-property :deadline oldtask))
                (oldeffstr (org-todoist--get-prop oldtask "EFFORT"))
@@ -539,12 +533,12 @@ the wrong headline!"
                                           ("duration" . ,(when eff `(("amount" . ,eff) ("unit" . "minute"))))
                                           ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
                                           ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
-                                          ("priority" . ,(org-todoist--get-priority hl))
+                                          ("priority" . ,pri)
                                           ("labels" . ,labels)
                                           ("auto_reminder" . ,org-todoist-use-auto-reminder)
                                           ("parent_id" . ,(org-todoist--get-task-id-position hl))
                                           ("section_id" . ,section)
-                                          ("project_id" . ,(org-todoist--get-project-id-position hl))
+                                          ("project_id" . ,proj)
                                           ("responsible_uid" . ,rid))))
                              commands)
                        (when comments
@@ -697,8 +691,19 @@ the wrong headline!"
                                 ("type" . "project_update")
                                 ("args" . (("name" . ,title)
                                            ("id" . ,id))))
-                              commands)
-                        )))))))
+                              commands))
+                       ((and isarchived (not oldisarchived))
+                        ;; archive project
+                        (push `(("uuid" . ,(org-id-uuid))
+                                ("type" . "project_archive")
+                                ("args" . (("id" . ,id))))
+                              commands))
+                       ((and (not isarchived) oldisarchived)
+                        ;; unarchive project
+                        (push `(("uuid" . ,(org-id-uuid))
+                                ("type" . "project_unarchive")
+                                ("args" . (("id" . ,id))))
+                              commands))))))))
     (when org-todoist-delete-remote-items
       (org-element-map
           old
@@ -830,7 +835,9 @@ the wrong headline!"
                           org-todoist--project-skip-list)))
 
                (when (eq t (assoc-default 'is_deleted proj))
-                 (org-element-extract node))))
+                 (org-element-extract node))
+               (when (eq t (assoc-default 'is_archived proj))
+                 (org-todoist--archive node))))
     (org-todoist--sort-by-child-order projects "child_order")
     (dolist (proj (org-todoist--project-nodes AST))
       (unless (member org-todoist--default-section-name (org-todoist--get-section-titles proj))
@@ -1181,7 +1188,7 @@ timestamp"
 
 (defun org-todoist--archive (NODE)
   "Archives NODE via tag"
-  (org-todoist--add-tag NODE "ARCHIVE"))
+  (org-todoist--add-tag NODE org-archive-tag))
 
 (defun org-todoist--get-description-elements (NODE)
   "Gets all paragraph elements that are not in a drawer."
