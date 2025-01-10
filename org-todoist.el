@@ -773,6 +773,7 @@ the wrong headline!"
   ;; TODO use element api
   (goto-char (point-min))
   (insert "#+title: Todoist
+#+STARTUP: hidedrawers
 #+STARTUP: logdone
 #+STARTUP: logdrawer
 "))

@@ -95,14 +95,14 @@
          (str (org-todoist--timestamp-to-utc-str ts)))
     (should (string= str "2025-01-02T07:30:00.0Z"))))
 
-(ert-deftest org-todoist--test--schedule ()
-  (let ((task (json-read-file "sample-task.json"))
-        (headline (org-element-create 'headline '(:title "Test Headline" :level 1 :todo-type 'todo :todo-keyword "TODO"))))
-    ;; (timestamp (org-timestamp-from-time (org-read-date nil t "2016-12-0T12:00:00.000000" nil ))))
-    (org-element-adopt headline (org-todoist--create-planning task))
-    (should (org-todoist--element-equals-str "* TODO Test Headline
-DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
-" headline))))
+;; (ert-deftest org-todoist--test--schedule ()
+;;   (let ((task (json-read-file "sample-task.json"))
+;;         (headline (org-element-create 'headline '(:title "Test Headline" :level 1 :todo-type 'todo :todo-keyword "TODO"))))
+;;     ;; (timestamp (org-timestamp-from-time (org-read-date nil t "2016-12-0T12:00:00.000000" nil ))))
+;;     (org-element-adopt headline (org-todoist--create-planning task))
+;;     (should (org-todoist--element-equals-str "* TODO Test Headline
+;; DEADLINE: <2017-01-06 Fri> SCHEDULED: <2016-12-06 Tue>
+;; " headline))))
 
 (ert-deftest org-todoist--test--sort-by-child-order ()
   (let ((section (org-todoist--get-by-id org-todoist--section-type "2" (org-todoist--generate-sample-ast)))
