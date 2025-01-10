@@ -60,13 +60,22 @@ Sample capture template:
          "* TODO %? %^G %^{EFFORT}p \nSCHEDULED: %^t"))
 #+end_src
 ** Collaboration
+*** Assigning Tasks
 #+begin_src emacs-lisp
-(org-todoist-assign-task)
-(org-todoist-unassign-task)
-(org-todoist-tag-user)
+(org-todoist-assign-task) ;; Prompts for user selection and changes the responsible uid property to the user's id
+(org-todoist-unassign-task) ;; Removes the responsibile uid property
 #+end_src
 
 [[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/assign.png]]
+*** Notifying users in comments
+#+begin_src emacs-lisp
+;; Inserts the special tag from the todoist app that formats to @User
+;; & adds the user id to uids_to_notify in the request
+(org-todoist-tag-user)
+
+;; non-nil to format in org link syntax instead of markdown for better viewing in org but worse in the Todoist app
+(setq org-todoist-comment-tag-user-pretty nil)
+#+end_src
 ** (Currently) unsupported features
 [X] = Implemented
 
@@ -74,22 +83,21 @@ Sample capture template:
 
 [ ] = Not currently supported
 
-- [ ] Subprojects
 - [-] Essential task items
   - [-] Recurring tasks[fn:2]
   - [ ] Quick add
- - [-] Comments
-   - [-] Item comments
-     - [X] Add and pull (plain-text only)
-     - [ ] Sort by time added
-     - [ ] Update
-     - [ ] Delete
-     - [-] Notify other users
-   - [ ] Project comments
-     - [ ] Add
-     - [ ] Update
-     - [ ] Delete
-     - [ ] Notify other users
+- [-] Comments
+  - [-] Item comments
+    - [X] Add and pull (plain-text only)
+    - [ ] Sort by time added
+    - [ ] Update
+    - [ ] Delete
+    - [-] Notify other users
+  - [ ] Project comments
+    - [ ] Add
+    - [ ] Update
+    - [ ] Delete
+    - [ ] Notify other users
 ** Quirks
 - Once a task has been permanently deleted in Todoist, changing the TODO state in org will be reset back to org-todoist-deleted-keyword on next sync. Todoist does not support reviving permanently deleted tasks.
 - Comments on subtasks are added to both the root task and the subtask on Todoist, which is reflected here.
