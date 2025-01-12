@@ -175,6 +175,8 @@ Things that I am not currently planning to implement (myself! you are welcome to
 - Location notifications
 - Updating or deleting comments
 - Markdown support
+- Activity log
+- View options
 
 * Disclaimer
 This package is not associated with, created by, or endorsed by [[https://doist.com/][Doist]] or [[https://orgmode.org/][Org]]

@@ -25,6 +25,7 @@
 (require 'org)
 (require 'org-capture)
 (require 'org-element)
+(require 'org-element-ast)
 (require 'ts)
 (require 'dash)
 (require 'json)
