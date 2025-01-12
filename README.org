@@ -52,13 +52,19 @@ Syncing is done using the [[https://developer.todoist.com/sync/v9/#overview][Tod
 ** Org capture to a Todoist project section
 /Captures will automatically sync by default/ via the ~org-capture-finalize-hook~.
 
-Sample capture template:
+Sample capture templates:
 #+begin_src emacs-lisp
-(setq org-capture-templates
-      `(("i" "Inbox" entry
+(setq org-capture-templates `(
+        ;; Capture directly to the inbox
+         ("i" "Inbox" entry
          (file+olp ,(org-todoist-file) ,org-todoist-project-headline "Inbox" "Default")
-         "* TODO %? %^G %^{EFFORT}p \nSCHEDULED: %^t"))
+         "* TODO %?")
+         ;; Capture to a specific project or section, prompting for tags, effort, task assignment, scheduled, and deadline times
+         ;; Projects are determined by projectile if possible, otherwise via and interactive prompt
+        ("p" "Select Project and Section" entry (function org-todoist--find-project-and-section)
+         "* TODO %? %^G %^{EFFORT}p %(org-todoist-assign-task) \nSCHEDULED: %^{Scheduled}t DEADLINE: %^{Deadline}t"))
 #+end_src
+
 ** Collaboration
 *** Assigning Tasks
 #+begin_src emacs-lisp
