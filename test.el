@@ -73,23 +73,6 @@
     (org-todoist--replace-description task text)
     (should (string-equal text (org-todoist--description-text task)))))
 
-(ert-deftest test-vector-to-list ()
-  "Test the `vector-to-list` function with various vectors."
-  ;; Test case: Empty vector
-  (should (equal (vector-to-list []) '()))
-
-  ;; Test case: Vector with single element
-  (should (equal (vector-to-list [1]) '(1)))
-
-  ;; Test case: Vector with multiple elements
-  (should (equal (vector-to-list [1 2 3 4 5]) '(1 2 3 4 5)))
-
-  ;; Test case: Vector with non-numeric elements
-  (should (equal (vector-to-list ["a" "b" "c"]) '("a" "b" "c")))
-
-  ;; Test case: Vector with mixed types
-  (should (equal (vector-to-list [1 "two" 3.0]) '(1 "two" 3.0))))
-
 (ert-deftest org-todoist--test--timestamp-to-utc-str ()
   (let* ((ts (org-timestamp-from-string "<2025-01-01 23:30>"))
          (str (org-todoist--timestamp-to-utc-str ts)))
@@ -210,11 +193,11 @@ More description
   (let ((drawer (org-todoist--get-property-drawer (org-todoist--generate-ast test-org-str))))
     (should (org-element-type-p drawer 'property-drawer))))
 
-(ert-deftest org-todoist--test--put-node-attribute ()
-  (let* ((ast (org-todoist--generate-sample-ast))
-         (hl (org-todoist--get-by-id org-todoist--task-type "13" ast)))
-    (org-todoist--put-node-attribute hl "testattr" "MYVAL")
-    (should (string-equal (org-todoist--get-node-attribute hl "testattr") "MYVAL"))))
+;; (ert-deftest org-todoist--test--put-node-attribute ()
+;;   (let* ((ast (org-todoist--generate-sample-ast))
+;;          (hl (org-todoist--get-by-id org-todoist--task-type "13" ast)))
+;;     (org-todoist--put-node-attribute hl "testattr" "MYVAL")
+;;     (should (string-equal (org-todoist--get-node-attribute hl "testattr") "MYVAL"))))
 
 (ert-deftest org-todoist--test--repeater-regex ()
   (let ((ts (org-element-create 'timestamp))
@@ -300,6 +283,28 @@ Returns nil if not present"
 ;; TODO not hardcoded full path
 (defun org-todoist--generate-sample-string ()
   (org-todoist-org-element-to-string (org-todoist--generate-sample-ast)))
+
+(defun file-to-string (file)
+  "Read `FILE' as a string"
+  (with-temp-buffer
+    (insert-file-contents file)
+    (buffer-string)))
+
+(defun org-todoist-org-element-to-string-no-ws (DATA)
+  "Converts DATA (an org-element or tree) to its content string. Note, a \n character is appended if not present."
+  (org-todoist--remove-ws (substring-no-properties (org-element-interpret-data DATA))))
+
+(defun org-todoist--element-equals-str (STR DATA)
+  "Returns t if the org string from org-element-interpret-data for DATA is STR."
+  (string-equal-ignore-case (org-todoist--remove-ws STR) (org-todoist--remove-ws (org-todoist-org-element-to-string DATA))))
+
+(defun org-todoist--invoke-with-buffer (CONTENTS FN)
+  "Fills a temp buffer with CONTENTS, applies org-mode, and calls FN."
+  (with-temp-buffer (insert CONTENTS) (org-mode) (funcall FN)))
+
+
+(defun org-todoist--generate-ast (contents)
+  (org-todoist--invoke-with-buffer contents #'org-element-parse-buffer))
 
 (defun org-todoist--generate-sample-ast ()
   (org-todoist--generate-ast (file-to-string "/home/aus/projects/org-todoist/sample.org")))

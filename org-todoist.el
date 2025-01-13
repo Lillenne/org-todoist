@@ -32,35 +32,55 @@
 (require 'outline)
 (require 'xdg)
 
-                                        ;Config;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+                                        ;Required setup;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TODO likely don't want to override user configuration. Todoist has 4 priorities.
 (setq org-priority-highest ?A
       org-priority-default ?D
       org-priority-lowest ?D)
+
+                                        ;Configuration Variables;;;;;;;;;;;;;;;
 ;; (defvar url-http-end-of-headers nil) ;; defined in url, but emacs provides warning about free var when using
+
 (defvar org-todoist-api-token nil "The API token to use to sync with Todoist.")
+
 (defvar org-todoist-delete-remote-items t
-  "Delete remote items on Todoist when deleted from the `'org-todoist-file'.
+  "Delete remote items on Todoist when deleted from the `org-todoist-file'.
 WARNING items archived to sibling files will be detected as deleted!")
+
 (defvar org-todoist-file "todoist.org" "The name of the todoist org file.
 If relative, it is taken as relative to the org directory.")
+
 (defvar org-todoist-user-headline "Collaborators" "The name of the root collaborators metadata node.")
+
 (defvar org-todoist-metadata-headline "Todoist Metadata" "The name of the Todoist metadata node.")
-(defvar org-todoist-tz nil "The timezone to use when converting from Todoist time (UTC). Currently this is ignored in favor of `'current-time'.")
+
+(defvar org-todoist-tz nil
+  "The timezone to use when converting from Todoist time (UTC).
+Currently this is ignored in favor of `current-time'.")
+
 (defvar org-todoist-lang "en")
+
 (defvar org-todoist-use-auto-reminder t)
+
+(defvar org-todoist-infer-project-for-capture t
+  "Whether to infer the active project in `org-capture'.")
+
 (defvar org-todoist-show-n-levels -1
   "The number of headline levels to show by default.
-If visiting the todoist buffer when sync is called, it will attempt to respect the
-visibility of the item at pos.
+If visiting the todoist buffer when sync is called, it will attempt to
+respect the visibility of the item at pos.
 2=projects,
 3=sections,
 4=root tasks,
 5=root tasks + 1 level of subtasks
 <0 no fold")
+
 (defvar org-todoist-todo-keyword "TODO" "TODO keyword for active Todoist tasks.")
+
 (defvar org-todoist-done-keyword "DONE" "TODO keyword for completed Todoist tasks.")
+
 (defvar org-todoist-deleted-keyword "CANCELED" "TODO keyword for deleted Todoist tasks.")
+
 (defvar org-todoist-comment-tag-user-pretty nil
   "Whether tagging users in comments should be pretty.
 
@@ -73,30 +93,51 @@ so it looks nice in the Todoist app.")
 
 If using multiple computers and a synced file solution,
 this directory must be accessible on all PCs")
-(defun org-todoist-file () (expand-file-name org-todoist-file org-directory))
+(defun org-todoist-file ()
+  "Gets the full path of the `org-todoist-file'."
+  (expand-file-name org-todoist-file org-directory))
 
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators") "The list of resource types to sync.")
+
 (defconst org-todoist-sync-endpoint "https://api.todoist.com/sync/v9/sync" "The todoist sync endpoint.")
+
 (defconst org-todoist-request-type "application/x-www-form-urlencoded; charset=utf-8" "The request type for Todoist sync requests.")
+
 (defconst org-todoist-http-method "POST" "The http method for Todoist sync requests.")
+
 (defconst org-todoist--type "TODOIST_TYPE" "The org property name for Todoist object type metadata.")
+
 (defconst org-todoist--collaborator-type "USER" "The org-todoist--type value for collaborator objects.")
+
 (defconst org-todoist--section-type "SECTION" "The org-todoist--type value for section objects.")
+
 (defconst org-todoist--project-type "PROJECT" "The org-todoist--type value for project objects.")
+
 (defconst org-todoist--default-id "default" "The org-todoist--type value for the default section.")
+
 (defconst org-todoist--id-property "tid" "The org-todoist--type value for the default section.")
+
 (defconst org-todoist--task-type "TASK" "The org-todoist--type value for task objects.")
+
 (defconst org-todoist--user-node-type "USER_HEADLINE" "The org-todoist--type value for the collaborator metadata node.")
+
 (defconst org-todoist--metadata-node-type "METADATA" "The org-todoist--type value for the root metadata node.")
+
 (defconst org-todoist--ignored-node-type "IGNORE" "The org-todoist--type value for the root metadata node.")
+
 (defconst org-todoist--default-section-name "Default Section")
+
 (defconst org-todoist--sync-areas ["collaborators", "projects", "items", "sections"] "The types of Todoist items to sync.")
 
 (defconst org-todoist--project-skip-list '(name can_assign_tasks color is_deleted is_favorite is_frozen sync_id v2_id v2_parent_id view_style collapsed))
+
 (defconst org-todoist--section-skip-list '(name sync_id updated_at is_deleted v2_id v2_project_id archived_at collapsed))
+
 (defconst org-todoist--task-skip-list '(name completed_at is_deleted content duration description checked deadline due labels priority project_id section_id sync_id v2_id v2_parent_id v2_project_id v2_section_id completed_at content day_order collapsed))
+
 (defconst org-todoist--sync-token-file "SYNC-TOKEN")
+
 (defconst org-todoist--sync-buffer-file "SYNC-BUFFER")
 
                                         ;Hooks;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -110,7 +151,9 @@ this directory must be accessible on all PCs")
 
 (add-to-list 'org-fold-show-context-detail '(todoist . lineage))
 
+                                        ;Org-capture integration;;;;;;;;;;;;;;;
 (defun org-todoist--sync-after-capture ()
+  "Syncs with todoist after any captures to the `org-todoist-file'."
   (unless org-note-abort
     (save-excursion
       (save-window-excursion
@@ -119,19 +162,85 @@ this directory must be accessible on all PCs")
         (when (string= (buffer-file-name) (org-todoist-file))
           (org-todoist-sync t))))))
 
-(defun org-todoist--get-selection (NODES PROMPT &optional SELECTION)
-  (let* ((names (unless SELECTION (--map (org-element-property :raw-value it) NODES)))
-         (selected (or SELECTION (completing-read PROMPT names)))
-         (selected-element (--first (string= (org-element-property :raw-value it) selected) NODES)))
-    `(,selected ,selected-element)))
+;;;###autoload
+(defun org-todoist-project-notes ()
+  "Find or create an ignored \"Notes\" heading under a Todoist project."
+  (let* ((headlines '("Notes"))
+         (ast (org-todoist--file-ast))
+         (projects (org-todoist--project-nodes ast))
+         (project-names (--map (org-element-property :raw-value it) projects))
+         (selected-project (if (and org-todoist-infer-project-for-capture (require 'projectile nil 'no-error))
+                               (if (string= (projectile-project-name) "-")
+                                   (completing-read "Which project? " project-names)
+                                 (projectile-project-name))
+                             (completing-read "Which project? " project-names)))
+         (selected-project-element (--first (string= (org-element-property :raw-value it) selected-project) projects)))
+    (push (if (s-blank? selected-project) "Inbox" selected-project) headlines)
+    (while-let ((parent-proj (org-todoist--get-parent-of-type org-todoist--project-type selected-project-element t)))
+      (push (org-todoist--get-title parent-proj) headlines)
+      (setq selected-project-element parent-proj))
+    (set-buffer (org-capture-target-buffer (org-todoist-file)))
+    (goto-char (point-min))
+    (org-todoist--capture-ensure-heading headlines)
+    (org-todoist-ignore-subtree)))
 
-(defun org-todoist--find-project-and-section ()
+(defun org-todoist--capture-ensure-heading (headings &optional initial-level)
+  "Starting at `INITIAL-LEVEL', ensures `HEADINGS' are created in the buffer.
+
+This function has been taken from Doom Emacs
+\(https://github.com/doomemacs/doomemacs), which is licensed under
+the MIT license.
+
+The MIT License (MIT)
+
+Copyright (c) 2014-2024 Henrik Lissner.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+\"Software\"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."
+  (if (not headings)
+      (widen)
+    (let ((initial-level (or initial-level 1)))
+      (if (and (re-search-forward (format org-complex-heading-regexp-format
+                                          (regexp-quote (car headings)))
+                                  nil t)
+               (= (org-current-level) initial-level))
+          (progn
+            (beginning-of-line)
+            (org-narrow-to-subtree))
+        (goto-char (point-max))
+        (unless (and (bolp) (eolp)) (insert "\n"))
+        (insert (make-string initial-level ?*)
+                " " (car headings) "\n")
+        (beginning-of-line 0))
+      (org-todoist--capture-ensure-heading (cdr headings) (1+ initial-level)))))
+
+;;;###autoload
+(defun org-todoist-find-project-and-section ()
+  "Find or create headlines for an `org-capture' to the `org-todoist-file'.
+Prompts for or auto-determines \(see `org-todoist-infer-project-for-capture')
+the Todoist project, section, and optionally parent task."
   (unless org-note-abort
     (let* ((headlines nil)
            (ast (org-todoist--file-ast))
            (projects (org-todoist--project-nodes ast))
            (project-names (--map (org-element-property :raw-value it) projects))
-           (selected-project (if (require 'projectile nil 'no-error)
+           (selected-project (if (and org-todoist-infer-project-for-capture (require 'projectile nil 'no-error))
                                  (if (string= (projectile-project-name) "-")
                                      (completing-read "Which project? " project-names)
                                    (projectile-project-name))
@@ -158,11 +267,11 @@ this directory must be accessible on all PCs")
         (setq selected-project-element parent-proj))
       (set-buffer (org-capture-target-buffer (org-todoist-file)))
       (goto-char (point-min))
-      (+org--capture-ensure-heading headlines))))
+      (org-todoist--capture-ensure-heading headlines))))
 
 (add-hook 'org-capture-after-finalize-hook #'org-todoist--sync-after-capture)
 
-                                        ;Data;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+                                        ;Debug data;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defvar org-todoist--sync-err nil "The error from the last sync, if any.")
 (defvar org-todoist-log-last-request t)
 (defvar org-todoist--last-request nil "The last request body, if any and org-todoist-log-last-request is non-nil.")
@@ -171,12 +280,16 @@ this directory must be accessible on all PCs")
 (defvar org-todoist-keep-old-sync-tokens nil)
 
 (defun org-todoist--set-last-response (JSON)
+  "Store the last Todoist response `JSON' to a file."
   (with-temp-file (org-todoist--storage-file "PREVIOUS.json")
     (insert JSON)))
 
-(defun org-todoist--storage-file (FILE) (expand-file-name FILE org-todoist-storage-dir))
+(defun org-todoist--storage-file (FILE)
+  "Determine full path of `FILE' relative to the `org-todoist-storage-dir'."
+  (expand-file-name FILE org-todoist-storage-dir))
 
 (defun org-todoist--set-sync-token (TOKEN)
+  "Store that last Todoist sync `TOKEN'."
   (let ((file (org-todoist--storage-file org-todoist--sync-token-file)))
     (with-temp-file file
       (when (and org-todoist-keep-old-sync-tokens (file-exists-p file))
@@ -185,6 +298,7 @@ this directory must be accessible on all PCs")
       (insert "\n"))))
 
 (defun org-todoist--get-sync-token ()
+  "Get the previous Todoist sync `TOKEN'."
   (if (file-exists-p (org-todoist--storage-file org-todoist--sync-token-file))
       (let ((res (with-temp-buffer
                    (insert-file-contents (org-todoist--storage-file org-todoist--sync-token-file))
@@ -195,11 +309,13 @@ this directory must be accessible on all PCs")
     "*"))
 
 (defun org-todoist--set-last-sync-buffer (AST)
+  "Store the last org syntax tree `AST'."
   (with-temp-file (org-todoist--storage-file org-todoist--sync-buffer-file)
     (org-mode)
     (insert (org-todoist-org-element-to-string AST))))
 
 (defun org-todoist--get-last-sync-buffer-ast ()
+  "Retrive the last org syntax tree `AST'."
   (let ((file (org-todoist--storage-file org-todoist--sync-buffer-file)))
     (when (file-exists-p file)
       (with-temp-buffer
@@ -207,27 +323,34 @@ this directory must be accessible on all PCs")
         (org-mode)
         (org-element-parse-buffer)))))
 
-
 (defun org-todoist--get-comments (HEADLINE)
-  (org-element-map HEADLINE 'item (lambda (item) (when (and (eq (org-todoist--first-parent-of-type item 'headline) HEADLINE)
-                                                            (org-todoist--is-note item))
-                                                   item))))
+  "Get the elements under `HEADLINE' corresponding to Todoist comments."
+  (org-element-map HEADLINE 'item
+    (lambda (item)
+      (when (and (eq (org-todoist--first-parent-of-type item 'headline) HEADLINE)
+                 (org-todoist--is-note item))
+        item))))
 
 (defun org-todoist--is-note (ITEM)
+  "If the `ITEM' is a note entry."
   (s-contains? "Note" (org-todoist--item-text ITEM)))
 
 (defun org-todoist--item-text (ITEM)
+  "Convert `ITEM' to its text representation."
   (org-todoist-org-element-to-string ITEM))
 
 (defun org-todoist--note-text (ITEM)
+  "Extract the Todoist comment out of an org note `ITEM'."
   (let ((text (org-todoist--item-text ITEM)))
     (when (s-contains? "Note taken on [" text) (s-trim-right (s-join "\n" (--map (s-trim it) (cdr (s-lines text))))))))
 
 (defun org-todoist--get-comments-text (HEADLINE)
+  "Extract all Todoist comments under `HEADLINE'."
   (--map (org-todoist--note-text it) (org-todoist--get-comments HEADLINE)))
 
                                         ;API Requests;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--select-user (TEXT)
+  "Interactively select a user from the list of collaborators with prompt `TEXT'."
   (if-let* ((ast (org-todoist--file-ast)) ;; TODO cache?
             (userelements (org-element-map (org-todoist--user-node ast) 'headline
                             (lambda (node) (when (org-todoist--node-type-query node org-todoist--collaborator-type) node))))
@@ -237,9 +360,11 @@ this directory must be accessible on all PCs")
       selectedelement))
 
 (defun org-todoist--all-users ()
+  "Get all headlines representing Todoist collaborators."
   (org-element-map (org-todoist--user-node (org-todoist--file-ast)) 'headline #'identity))
 
 (defun org-todoist--encode (DATA)
+  "Encode the Todoist sync API request alist `DATA'."
   (mapconcat
    (lambda (data)
      (if (null (cdr data)) "[]"
@@ -253,17 +378,22 @@ this directory must be accessible on all PCs")
    "&"))
 
 (defun org-todoist--encode-item (ITEM)
+  "Encode an `ITEM' \(e.g., commands\) of the Todoist sync API request."
   (if (json-alist-p (cdr ITEM))
       (concat (car ITEM)
               (org-todoist--encode-item ITEM))
     (json-encode ITEM)))
 
 (defun org-todoist--label-default-sections (AST)
+  "Detect and label the default Todoist sections in syntax tree `AST'."
   (dolist (section (org-todoist--get-sections AST))
     (when (string= (org-element-property :raw-value section) org-todoist--default-section-name)
       (org-todoist--insert-id section org-todoist--default-id))))
 
 (defun org-todoist--do-sync (TOKEN OPEN)
+  "Diff the Todoist org file, perform the API request, and update the file.
+`TOKEN' is the previous incremental sync token.
+`OPEN' determines whether the Todoist buffer should be opened after sync."
   (when (or (null org-todoist-api-token) (not (stringp org-todoist-api-token)))
     (error "No org-todoist-api-token API token set"))
   (setq org-todoist--sync-err nil)
@@ -296,6 +426,14 @@ this directory must be accessible on all PCs")
                   'inhibit-cookies)))
 
 (defun org-todoist--do-sync-callback (events open ast old cur-headline show-n-levels)
+  "The callback to invoke after syncing with the Todoist API.
+
+`EVENTS' are the http events from the request.
+`OPEN' indicates if the Todoist buffer should be opened.
+`AST' is the current abstract syntax tree of the local Todoist buffer.
+`OLD' is the abstract syntax tree of the previous Todoist buffer.
+`CUR-HEADLINE' is the headline at point when the sync was invoked.
+`SHOW-N-LEVELS' is the number of levels of the org document to show."
   (if (plist-member events :error)
       (progn (setq org-todoist--sync-err events)
              (message "Sync failed. See org-todoist--sync-err for details."))
@@ -304,11 +442,12 @@ this directory must be accessible on all PCs")
       (when org-todoist-log-last-response
         (org-todoist--set-last-response resp)
         (setq org-todoist--last-response (json-read-from-string resp))))
-    (org-todoist--parse-response org-todoist--last-response ast old)
+    (org-todoist--parse-response org-todoist--last-response ast)
     (org-todoist--handle-display cur-headline show-n-levels)
     (message "Sync complete.")))
 
 (defun org-todoist--get-todoist-buffer ()
+  "Gets the org-todoist buffer, preferring open buffers."
   (let* ((file (org-todoist-file))
          (fb (find-buffer-visiting file)))
     (if fb
@@ -316,6 +455,10 @@ this directory must be accessible on all PCs")
       (find-file-noselect file))))
 
 (defun org-todoist--handle-display (cur-headline show-n-levels)
+  "Handle saving and folding of the `org-todoist-file' buffer.
+
+`CUR-HEADLINE' is the headline at point prior to the sync call.
+`SHOW-N-LEVELS' is the number of outline levels to show."
   (with-current-buffer (org-todoist--get-todoist-buffer)
     (unless show-n-levels (setq show-n-levels org-todoist-show-n-levels))
     (if (< show-n-levels 1)
@@ -335,24 +478,27 @@ this directory must be accessible on all PCs")
         (goto-char (point-min))))))
 
 (defun org-todoist--first-parent-of-type (NODE TYPES)
-  "Gets the first parent which is one of the given TYPES.
-TYPES can be a single symbol or a list of symbols."
+  "Gets the first parent of `NODE' which is one of the given `TYPES'.
+`TYPES' can be a single symbol or a list of symbols."
   (org-element-lineage-map NODE #'identity TYPES nil t))
 
 (defun org-todoist--get-planning-date (NODE KEYWORD)
+  "Gets the Todoist-formatted date with `KEYWORD' from `NODE'."
   (let ((prop (org-element-property KEYWORD NODE)))
     (when prop (org-todoist--date-to-todoist prop))))
 ;; (org-todoist--date-to-todoist (org-element-property KEYWORD (org-todoist--get-planning NODE)))) ;; Can just grab from the headline. May not have planning
 
 (defun org-todoist--get-planning (NODE)
-  "Gets the planning element for specified headline"
-  (unless (eq (org-element-type NODE) 'headline) (error "org-todoist--get--planning only supports headline input nodes"))
+  "Gets the planning element for specified `NODE'."
+  (unless (eq (org-element-type NODE) 'headline)
+    (error "Org-todoist--get--planning only supports headline input nodes"))
   (car (org-element-map NODE 'planning (lambda (planning)
                                          (when (eq NODE
                                                    (org-todoist--first-parent-of-type planning 'headline))
                                            planning)))))
 
 (defun org-todoist--date-to-todoist (TIMESTAMP)
+  "Convert an org-element `TIMESTAMP' to the Todoist date representation."
   (let ((month (org-element-property :month-start TIMESTAMP))
         (day (org-element-property :day-start TIMESTAMP)))
     (concat
@@ -375,6 +521,9 @@ TYPES can be a single symbol or a list of symbols."
                  ":00.0"))))))
 
 (defun org-todoist--todoist-date-object-for-kw (NODE KEYWORD)
+  "Create the Todoist date JSON object for `KEYWORD' in `NODE'.
+
+`KEYWORD' is :scheduled, :deadline, or :closed"
   (let ((dl (org-todoist--get-planning-date NODE KEYWORD)))
     (when dl
       (let ((res `(("date" . ,dl)
@@ -391,12 +540,14 @@ TYPES can be a single symbol or a list of symbols."
         res))))
 
 (defun org-todoist--repeater-to-string (TIMESTAMP)
+  "Convert a repeating `TIMESTAMP' to it's Todoist string representation."
   (let ((value (org-element-property :repeater-value TIMESTAMP))
         (unit (org-element-property :repeater-unit TIMESTAMP)))
     (when (and value unit)
       (concat "every " (number-to-string value) " " (symbol-name unit)))))
 
 (defun org-todoist--add-repeater (TIMESTAMP STRING)
+  "Add a repeater value to `TIMESTAMP' from Todoist `STRING'."
   ;; TODO more repeater cases https://todoist.com/help/articles/introduction-to-recurring-due-dates-YUYVJJAV
   (let ((match (s-match ".*\\([0-9]+\\) \\([week|day|month|hour]+\\)" STRING)))
     (when match
@@ -405,9 +556,11 @@ TYPES can be a single symbol or a list of symbols."
       (org-element-put-property TIMESTAMP :repeater-value (if (string= (cadr match) "") 1 (string-to-number (cadr match)))))))
 
 (defun org-todoist--task-is-recurring (TASK)
+  "If `TASK' is a recurring task."
   (not (null (org-element-property :repeater-type (org-element-property :scheduled TASK)))))
 
 (defun org-todoist--log-drawer (HL)
+  "Gets the LOGBOOK drawer for `HL'."
   (org-element-map HL 'drawer (lambda (drawer)
                                 ;; make sure the arg HL is the direct parent headline of the drawer
                                 (when (and (string= (org-element-property :drawer-name drawer) "LOGBOOK")
@@ -416,16 +569,16 @@ TYPES can be a single symbol or a list of symbols."
                    nil t))
 
 (defun org-todoist--log-drawer-add-note (HL TEXT DATE)
+  "Add a note with `TEXT' to the LOGBOOK drawer for `HL' timestamped `DATE'."
   (let ((drawer (org-todoist--log-drawer HL))
         (note (org-element-create 'item '(:bullet "-" :pre-blank 0)
                                   (org-element-create 'plain-text nil (concat "Note taken on "
                                                                               (org-todoist-org-element-to-string (org-todoist--get-ts-from-date DATE t))
-                                                                              ;; (org-todoist-org-element-to-string (org-timestamp-from-time (current-time) t t))
                                                                               " \\\\\n"
                                                                               TEXT)))))
     (if drawer
         (if-let ((children (org-element-contents drawer)))
-            (org-element-insert-before note (car children)) ;; TODO this adds as first note in org, per standard org (todoist is the invers)
+            (org-element-insert-before note (car children)) ; TODO this adds as first note in org, per standard org (todoist is the invers)
           (org-element-adopt drawer note))
       (setq drawer (org-element-create 'drawer '(:drawer-name "LOGBOOK") note))
       (org-todoist--adopt-drawer HL drawer)))
@@ -439,41 +592,42 @@ TYPES can be a single symbol or a list of symbols."
       nil t)))
 
 (defun org-todoist--adopt-drawer (HL DRAWER)
-  "Adopts a DRAWER in the correct location under HL.
+  "Adopts a `DRAWER' in the correct location under `HL'.
 If the new drawer isn't added by the other drawers, it may get pushed under
 the wrong headline!"
   ;; Check for a description to insert before
   (if (eq 'property-drawer (org-element-type DRAWER))
       ;; NOTE Having other drawers before property drawer makes property drawers parse as regular drawers. Avoid this.
       (if-let ((first-drawer (org-todoist--first-direct-descendent-of-type HL 'drawer)))
-          ;; assume drawers are in front of description elements
-          (org-element-insert-before DRAWER first-drawer)
+          (org-element-insert-before DRAWER first-drawer) ; assume drawers are in front of description elements
         (org-todoist--adopt-drawer-regular HL DRAWER))
     (org-todoist--adopt-drawer-regular HL DRAWER)))
 
 (defun org-todoist--adopt-drawer-regular (HL DRAWER)
+  "Adopts a `DRAWER' in the correct location under `HL'."
   (let ((description (org-todoist--get-description-elements HL)))
     (if description
-        ;; Has a description, insert before that (end of drawers)
-        (org-element-insert-before DRAWER (car description))
+        (org-element-insert-before DRAWER (car description)) ; Has a description, insert before that (end of drawers)
       (let ((child-hl (org-element-map (org-element-contents HL) 'headline #'identity nil t)))
         (if child-hl
-            ;; Has a child headline, insert before that
-            (org-element-insert-before DRAWER child-hl)
-          ;; Doesn't have child headlines or description. Safe to adopt at end of children
-          (org-element-adopt HL DRAWER))))))
+            (org-element-insert-before DRAWER child-hl) ; Has a child headline, insert before that
+          (org-element-adopt HL DRAWER)))))) ; Doesn't have child headlines or description. Safe to adopt at end of children
 
 (defun org-todoist--last-recurring-task-completion (TASK)
+  "Get the :LAST_REPEAT property of a `TASK'."
   (when (org-todoist--task-is-recurring TASK)
     (org-timestamp-from-string (org-element-property :LAST_REPEAT TASK))))
 
 (defun org-todoist--last-recurring-task-completion-as-doist (TASK)
+  "Convert the :LAST_REPEAT property of `TASK' to a Todoist object."
   (org-todoist--date-to-todoist (org-todoist--last-recurring-task-completion TASK)))
 
 (defun org-todoist--push-test ()
+  "Return the commands that will be executed on next sync."
   (org-todoist--push (org-todoist--file-ast) (org-todoist--get-last-sync-buffer-ast)))
 
 (defun org-todoist--timestamp-times-equal (T1 T2)
+  "Equality comparison for org timestamp elements `T1' and `T2'."
   (and (equal (org-element-property :year-start T1) (org-element-property :year-start T2))
        (equal (org-element-property :month-start T1) (org-element-property :month-start T2))
        (equal (org-element-property :day-start T1) (org-element-property :day-start T2))
@@ -481,6 +635,7 @@ the wrong headline!"
        (equal (org-element-property :minute-start T1) (org-element-property :minute-start T2))))
 
 (defun org-todoist--get-tags (NODE)
+  "Get all tags of `NODE', including inherited tags."
   (let ((all-tags nil))
     (org-element-lineage-map NODE
         (lambda (hl) (let ((tags (org-element-property :tags hl)))
@@ -491,18 +646,23 @@ the wrong headline!"
     all-tags))
 
 (defun org-todoist--get-labels (TAGS)
+  "Filter `TAGS' to exclude tags that should not be Todoist labels."
   (--filter (not (string= org-archive-tag it)) TAGS))
 
 (defun org-todoist--get-section-id-position-non-default (HL)
-  "Use this when pushing updates (we don't want to send id=default) to Todoist."
+  "Get the id of the section `HL' is under if it is not the default.
+
+Use this when pushing updates (we don't want to send id=default) to Todoist."
   (let ((res (org-todoist--get-section-id-position HL)))
     (unless (string= res org-todoist--default-id)
       res)))
 
 (defun org-todoist--get-notify-ids (STRING)
+  "Extract the ids to notify from `STRING'."
   (--map (cadr it) (s-match-strings-all "todoist-mention://\\([0-9]+\\)" STRING)))
 
 (defun org-todoist--get-note-add (id comment)
+  "Get the note_add command for `COMMENT' on task with `ID'."
   (let ((args `(("item_id" . ,id) ;; task uuid/tempid
                 ("content" . ,comment)))
         (matches (org-todoist--get-notify-ids comment)))
@@ -516,11 +676,15 @@ the wrong headline!"
       ("args" . ,args))))
 
 (defun org-todoist--is-ignored (NODE)
+  "If the `NODE' should be ignored."
   (org-element-lineage-map NODE #'org-todoist--is-ignored-type 'headline t t))
 
-(defun org-todoist--is-ignored-type (NODE) (string= (org-todoist--get-todoist-type NODE t) org-todoist--ignored-node-type))
+(defun org-todoist--is-ignored-type (NODE)
+  "If the `NODE' has the `org-todoist--ignored-node-type'."
+  (string= (org-todoist--get-todoist-type NODE t) org-todoist--ignored-node-type))
 
 (defun org-todoist--push (ast old)
+  "Create commands for changes in the syntax tree from `OLD' to `AST'."
   (let ((commands nil))
     (org-todoist--label-default-sections ast)
     (org-element-map ast 'headline
@@ -812,21 +976,23 @@ the wrong headline!"
     (nreverse commands)))
 
 (defun org-todoist--is-subtask (NODE)
+  "If `NODE' is a headline representings a substask."
   (org-todoist--get-parent-of-type org-todoist--task-type NODE t))
 
 (defun org-todoist--is-project (NODE)
+  "If `NODE' is a headline representings a project."
   (string= (org-todoist--get-todoist-type NODE) org-todoist--project-type))
 
 (defun org-todoist--is-section (NODE)
+  "If `NODE' is a headline representings a section."
   (string= (org-todoist--get-todoist-type NODE) org-todoist--section-type))
 
 (defun org-todoist--is-task (NODE)
+  "If `NODE' is a headline representings a task."
   (string= (org-todoist--get-todoist-type NODE) org-todoist--task-type))
-;; (org-element-lineage-map NODE (lambda (parent) (string= org-todoist--section-type (org-todoist--get-todoist-type parent))) 'headline nil t))
-;; (or (org-element-property :TODOIST_TYPE NODE) ;; causes issues when refiling
-;;     (org-element-lineage-map NODE (lambda (parent) (string= org-todoist--section-type (org-todoist--get-todoist-type parent))) 'headline nil t)))
 
-(defun org-todoist--parse-response (RESPONSE AST OLDAST)
+(defun org-todoist--parse-response (RESPONSE AST)
+  "Parse Todoist sync `RESPONSE' alist and update `AST'."
   (let ((tasks (assoc-default 'items RESPONSE))
         (projects (assoc-default 'projects RESPONSE))
         (collab (assoc-default 'collaborators RESPONSE))
@@ -845,6 +1011,7 @@ the wrong headline!"
     (org-todoist--update-file AST)))
 
 (defun org-todoist--temp-id-mapping (TID_MAPPING AST)
+  "Add ids to node with a temp_id in `AST' using `TID_MAPPING'."
   (dolist (elem TID_MAPPING)
     (org-element-map AST 'headline
       (lambda (hl)
@@ -855,6 +1022,7 @@ the wrong headline!"
       nil t)))
 
 (defun org-todoist--update-comments (COMMENTS AST)
+  "Update comments in `AST' using `COMMENTS' section of Todoist sync API response."
   (cl-loop for comment across COMMENTS do
            ;; TODO support comment IDs and add/update/delete
            (let* ((task (org-todoist--get-by-id org-todoist--task-type (assoc-default 'item_id comment) AST))
@@ -866,6 +1034,7 @@ the wrong headline!"
              )))
 
 (defun org-todoist--insert-header ()
+  "Insert header for `org-todoist-file'."
   ;; TODO use element api
   (goto-char (point-min))
   (insert "#+title: Todoist
@@ -873,7 +1042,6 @@ the wrong headline!"
 #+STARTUP: logdone
 #+STARTUP: logdrawer
 "))
-
 
 ;; (section
 ;;  (:standard-properties
@@ -896,6 +1064,7 @@ the wrong headline!"
 ;;    :key "STARTUP" :value "logdrawer")))
 
 (defun org-todoist--update-projects (PROJECTS AST)
+  "Update projects in `AST' using `PROJECTS' section of Todoist sync API response."
   (cl-loop for proj across PROJECTS do
            (let ((node (org-todoist--get-or-create-node
                         AST
@@ -919,32 +1088,41 @@ the wrong headline!"
         (org-todoist--add-prop default-section org-todoist--id-property org-todoist--default-id)))))
 
 (defun org-todoist--get-tasks (ITEM)
-  (org-element-map (org-element-contents ITEM) 'headline (lambda (hl) (when (and (string= (org-todoist--get-todoist-type hl) org-todoist--task-type)
-                                                                                 (eq ITEM (org-todoist--first-parent-of-type hl 'headline)))
-                                                                        hl))))
+  "Get Todoist task headlines directly under `ITEM'."
+  (org-element-map (org-element-contents ITEM) 'headline
+    (lambda (hl) (when (and (string= (org-todoist--get-todoist-type hl) org-todoist--task-type)
+                            (eq ITEM (org-todoist--first-parent-of-type hl 'headline)))
+                   hl))))
 
 (defun org-todoist--get-tasks-all (ITEM)
+  "Get all Todoist task headlines (including subtasks) under `ITEM'."
   (org-element-map (org-element-contents ITEM) 'headline (lambda (hl) (when (string= (org-todoist--get-todoist-type hl) org-todoist--task-type)
                                                                         hl))))
 
 (defun org-todoist--get-sections (PROJECT)
-  (org-element-map (org-element-contents PROJECT) 'headline (lambda (hl) (when (string= (org-todoist--get-todoist-type hl) org-todoist--section-type) hl))))
+  "Get all section headlines belonging to `PROJECT'."
+  (org-element-map (org-element-contents PROJECT) 'headline
+    (lambda (hl) (when (and (string= (org-todoist--get-todoist-type hl) org-todoist--section-type)
+                            (eq (org-todoist--get-parent-of-type org-todoist--project-type hl t) PROJECT))
+                   hl))))
 
 (defun org-todoist--get-title (NODE)
+  "Get the title string of headline, `NODE'."
   (let ((title (org-element-property :title NODE)))
     (while (and title (not (eq 'string (type-of title))))
       (setq title (car title)))
     (substring-no-properties title)))
 
 (defun org-todoist--get-section-titles (NODE)
+  "Extract the titles of all sections under `NODE'."
   (--map (org-todoist--get-title it) (org-todoist--get-sections NODE)))
 
 (defun org-todoist--user-node (AST)
-  "Gets or creates the main user headline in AST"
+  "Get or create the main user headline in `AST'."
   (org-todoist--category-node-query-or-create (org-todoist--metadata-node AST) org-todoist-user-headline org-todoist--user-node-type))
 
 (defun org-todoist--metadata-node (AST)
-  "Gets or creates the main user headline in AST"
+  "Get or create the main metadata headline in `AST'."
   (let* ((md (org-todoist--category-node-query-or-create AST org-todoist-metadata-headline org-todoist--metadata-node-type))
          ;; (tags (org-element-property :tags md))
          )
@@ -956,7 +1134,7 @@ the wrong headline!"
     ))
 
 (defun org-todoist--update-users (COLLAB AST)
-  "Adds or updates all users"
+  "Update all users in `AST' from API response collaborator section, `COLLAB'."
   (let ((usernode (org-todoist--user-node AST)))
     (cl-loop for usr across COLLAB do
              (org-todoist--get-or-create-node usernode
@@ -967,7 +1145,7 @@ the wrong headline!"
                                               usr))))
 
 (defun org-todoist--update-sections (SECTIONS AST)
-  "Updates all sections"
+  "Update all sections in `AST' using `SECTIONS' portion of API response."
   (cl-loop for sect across SECTIONS do
            (let ((targetprojid (assoc-default 'project_id sect)))
              (if-let* ((sectionid (assoc-default 'id sect))
@@ -999,29 +1177,27 @@ the wrong headline!"
     )) ;; TODO add default section here? Otherwise might not be added to new projects without manually added default section?
 
 (defun org-todoist--project-nodes (AST)
-  "Gets all project nodes within the org-todoist file"
+  "Get all project nodes within the `org-todoist-file' syntax tree, `AST'."
   (org-element-map AST 'headline
     (lambda (hl) (when (string-equal (org-todoist--get-todoist-type hl) org-todoist--project-type) hl))))
 
 (defun org-todoist--section-nodes (AST)
-  "Gets all section nodes within the org-todoist file"
+  "Get all section nodes within the `org-todoist-file' syntax tree, `AST'."
   (org-element-map AST 'headline
     (lambda (hl) (when (string-equal (org-todoist--get-todoist-type hl) org-todoist--section-type) hl))))
 
-(defun org-todoist--unsectioned-node (AST)
-  (org-element-map AST 'headline
-    (lambda (hl) (when (and (string-equal (org-todoist--get-todoist-type hl) org-todoist--section-type)
-                            (string-equal org-todoist--default-section-name (substring-no-properties (org-element-property :title hl))))
-                   hl))))
-
 (defun org-todoist--get-headline-level (NODE)
-  "Gets the nearest headline level of NODE"
+  "Get the nearest headline level of `NODE'."
   (if-let (hl (org-element-lineage-map NODE (lambda (n) (when (org-element-type n 'headline) (org-element-property :level n))) nil t t))
       hl
     0))
 
 (defun org-todoist--create-node (TYPE TEXT DESCRIPTION &optional PROPERTIES PARENT SKIP)
-  "Creates node of TODOIST_TYPE TYPE with default TEXT and PROPERTIES under PARENT."
+  "Create node of TODOIST_TYPE `TYPE' under `PARENT'.
+
+`TEXT' is the headline title and `PROPERTIES' are added to the
+headline property drawer. `DESCRIPTION' is the text added under the headline.
+Skip properties in `SKIP' list."
   (let ((node (org-element-create 'headline `(:title ,TEXT :level ,(+ 1 (org-todoist--get-headline-level PARENT))))))
     (org-todoist--insert-identifier node TYPE)
     (org-todoist--add-all-properties node PROPERTIES SKIP)
@@ -1030,9 +1206,11 @@ the wrong headline!"
     node))
 
 (defun org-todoist--add-description (NODE DESCRIPTION)
+  "Add `DESCRIPTION' text to `NODE'."
   (org-element-adopt NODE (org-todoist--create-description-element DESCRIPTION)))
 
 (defun org-todoist--create-description-element (DESCRIPTION)
+  "Create a description org element for text `DESCRIPTION'."
   (org-element-create 'paragraph nil
                       (org-element-create 'plain-text nil
                                           (if (s-ends-with? "\n" DESCRIPTION)
@@ -1040,7 +1218,7 @@ the wrong headline!"
                                             (concat DESCRIPTION "\n")))))
 
 (defun org-todoist--replace-description (NODE DESCRIPTION)
-  "Replaces the description of NODE with DESCRIPTION."
+  "Replace the description of `NODE' with `DESCRIPTION' text."
   (if DESCRIPTION
       (let ((comment (org-todoist--description-text NODE))
             (idx 0)) ;; Use idx to replace the first paragraph element
@@ -1054,11 +1232,16 @@ the wrong headline!"
           (when (eql idx 0) (org-todoist--add-description NODE DESCRIPTION)) ;; There was no description, add the new one
           DESCRIPTION))))
 
-(defun org-todoist--get-or-create-node (PARENT TYPE ID TEXT DESCRIPTION PROPERTIES &optional SKIP SOURCE)
-  "Gets or creates a new node of TODOIST_TYPE TYPE with ID, headline TEXT,
-body DESCRIPTION, and drawer PROPERTIES, ignoring SKIP, under PARENT.
+(defun org-todoist--get-or-create-node
+    (PARENT TYPE ID TEXT DESCRIPTION PROPERTIES &optional SKIP SOURCE)
+  "Get or create a new node.
 
-When SOURCE is specified, search for the node from there. Else search from PARENT"
+The node will have of TODOIST_TYPE `TYPE', `org-todoist--id-property'`ID',
+headline `TEXT', body `DESCRIPTION', and drawer `PROPERTIES',ignoring `SKIP',
+under `PARENT'.
+
+When SOURCE is specified, search for the node from there. Else search
+from PARENT."
   (if-let* ((found (org-todoist--get-by-id nil ID (if SOURCE SOURCE PARENT)))
             (updated (org-todoist--add-all-properties found PROPERTIES SKIP)))
       (progn
@@ -1069,20 +1252,23 @@ When SOURCE is specified, search for the node from there. Else search from PAREN
         updated)
     (org-todoist--create-node TYPE TEXT DESCRIPTION PROPERTIES PARENT SKIP)))
 
-
-(defun vector-to-list (vector)
-  "Convert a VECTOR into a regular Lisp list using cl-loop."
-  (cl-loop for element across vector collect element))
-
 (defun org-todoist--closed-date (TASK)
+  "Get the timestamp object representing the closed date of `TASK'."
   (let ((date (assoc-default 'completed_at TASK)))
     (org-todoist--get-ts-from-date date)))
 
-(defun org-todoist--scheduled-date (TASK) (org-todoist--get-timestamp 'due TASK))
-(defun org-todoist--deadline-date (TASK) (org-todoist--get-timestamp 'deadline TASK))
+(defun org-todoist--scheduled-date (TASK)
+  "Get the timestamp object representing the scheduled date of TASK."
+  (org-todoist--get-timestamp 'due TASK))
+
+(defun org-todoist--deadline-date (TASK)
+  "Get the timestamp object representing the deadline date of `TASK'."
+  (org-todoist--get-timestamp 'deadline TASK))
 
 (defun org-todoist--get-ts-from-date (date &optional inactive)
-  ;; TODO more efficient utc conversions
+  "Get a timestamp object representing `DATE' in the `current-time-zone'.
+
+When `INACTIVE', return an inactive timestamp."
   (unless (null date)
     (let ((hastime (not (eql 10 (length date))))) ;; Todoist date format for tasks without a time is 10 char string
       (if (not (string= (substring date (- (length date) 1)) "Z"))
@@ -1090,9 +1276,11 @@ When SOURCE is specified, search for the node from there. Else search from PAREN
         (org-todoist--timestamp-from-utc-str date hastime inactive)))))
 
 (defun org-todoist--get-timestamp (SYMBOL TASK)
+  "Get a timestamp object for scheduled, deadline, or closed `SYMBOL' under `TASK'."
   (org-todoist--get-timestamp2 (assoc-default SYMBOL TASK)))
 
 (defun org-todoist--get-timestamp2 (DATEOBJ)
+  "Create a timestamp from a Todoist `DATEOBJ'."
   (when-let* ((date (assoc-default 'date DATEOBJ))
               (hasdate (org-todoist--has-date date))
               (ts (org-todoist--get-ts-from-date date)))
@@ -1101,9 +1289,11 @@ When SOURCE is specified, search for the node from there. Else search from PAREN
     ts))
 
 (defun org-todoist--timestamp-from-utc-str (STRING &optional WITH-TIME INACTIVE)
-  "Creates an an org mode timestamp element from STRING, which is an RFC3339
-datetime string. With arg WITH-TIME include the time-of-day portion in the
-timestamp"
+  "Create an an org mode timestamp element from `STRING'.
+
+`STRING' is an RFC3339 datetime string. With arg `WITH-TIME' include the
+time-of-day portion in the timestamp. When `INACTIVE', make the timestamp
+inactive."
   (org-timestamp-from-string (concat (if INACTIVE "[" "<")
                                      (ts-format
                                       (if WITH-TIME "%Y-%m-%d %a %H:%M" "Y-%m-%d %a")
@@ -1111,14 +1301,16 @@ timestamp"
                                      (if INACTIVE "]" ">"))))
 
 (defun org-todoist--timestamp-to-utc-str (TIMESTAMP)
-  "Converts org timestamp element to utc RFC3339 string"
+  "Converts org `TIMESTAMP' element to a UTC RFC3339 string"
   (ts-format "%Y-%m-%dT%H:%M:%S.0Z"
              (ts-adjust 'second (- (car (current-time-zone))) (ts-parse-org-element TIMESTAMP))))
 
 (defun org-todoist--has-date (DATE)
-  (not (or (null DATE) (string-equal "" DATE) (string-equal "null" DATE))))
+  "If `DATE' is not nil, empty, or \"null\"."
+  (not (or (s-blank? DATE) (string-equal "null" DATE))))
 
 (defun org-todoist--create-planning (TASK)
+  "Create a planning element for Todoist `TASK' API response."
   (let ((props nil)
         (sch (org-todoist--scheduled-date TASK))
         (dead (org-todoist--deadline-date TASK))
@@ -1129,6 +1321,7 @@ timestamp"
     (when props (org-element-create 'planning props))))
 
 (defun org-todoist--schedule (HEADLINE TASK)
+  "Add planning information to `HEADLINE' using API response info `TASK'."
   (let ((planning (org-todoist--create-planning TASK)))
     (if-let ((existing (org-element-map HEADLINE 'planning
                          (lambda (plan)
@@ -1140,6 +1333,7 @@ timestamp"
       (when planning (org-element-insert-before planning (org-todoist--get-property-drawer HEADLINE))))))
 
 (defun org-todoist--update-tasks (TASKS AST)
+  "Update all tasks in `AST' using `TASKS' portion of API response."
   (cl-loop for data across TASKS do
            (let* ((id (assoc-default 'id data))
                   (proj (org-todoist--get-by-id org-todoist--project-type (assoc-default 'project_id data) AST))
@@ -1157,7 +1351,6 @@ timestamp"
                ;; If unsectioned, add to the default section in that project
                (unless section (setq section (org-todoist--get-by-id org-todoist--section-type org-todoist--default-id proj)))
 
-               ;; TODO not correctly moving sections
                ;; check if we need to move sections
                (unless (cl-equalp (org-todoist--get-section-id-position task) section-id)
                  (org-element-extract task)
@@ -1182,39 +1375,40 @@ timestamp"
       (org-todoist--sort-by-child-order parent "child_order"))))
 
 (defun org-todoist--adopt-sub (PARENT CHILD)
+  "Adopt `CHILD' under `PARENT' and increase the :level to parent + 1."
   (org-element-adopt PARENT (org-element-put-property (org-element-extract CHILD) :level (+ 1 (org-element-property :level PARENT)))))
 
-(defun org-todoist--list-headlines ()
-  (let ((headlines nil))
-    (org-element-map (org-element-parse-buffer) 'headline
-      (lambda (headline)
-        (push (org-element-property :raw-value headline) headlines)))
-    (nreverse headlines)))
+(defun org-todoist--get-node-attributes (NODE)
+  "Get the attributes list of `NODE'."
+  (cadr NODE))
 
-(defun org-todoist--get-headline-by-raw-value (NODE VALUE)
-  (org-element-map NODE 'headline (lambda (hl) (when (string-equal (org-element-property :raw-value hl) VALUE) hl))))
-
-(defun org-todoist--get-node-attributes (NODE) (cadr NODE))
 (defun org-todoist--get-node-attribute (NODE ATTRIBUTE)
+  "Get an `ATTRIBUTE' from the attribute list of `NODE'.
+
+If `ATTRIBUTE' is a string, it will be automatically converted to the
+appropriate symbol representation."
   (plist-get (org-todoist--get-node-attributes NODE) (org-todoist--to-symbol ATTRIBUTE)))
 
 ;; ;; Not working as a new plist is returned. Needs to mutate
-(defun org-todoist--put-node-attribute (NODE ATTRIBUTE VALUE)
-  (setcar (cdr NODE) (plist-put (org-todoist--get-node-attributes NODE)
-                                (org-todoist--to-symbol ATTRIBUTE)
-                                VALUE)))
+;; (defun org-todoist--put-node-attribute (NODE ATTRIBUTE VALUE)
+;;   (setcar (cdr NODE) (plist-put (org-todoist--get-node-attributes NODE)
+;;                                 (org-todoist--to-symbol ATTRIBUTE)
+;;                                 VALUE)))
 
 (defun org-todoist--to-symbol (SYMBOL-OR-STRING)
+  "If `SYMBOL-OR-STRING' is a string, convert it to an uppercase symbol."
   (if (stringp SYMBOL-OR-STRING) (intern (concat ":" (upcase SYMBOL-OR-STRING))) SYMBOL-OR-STRING))
 
 ;; (defun org-todoist--get-headline-by-title-value (NODE VALUE)
 ;;   (org-element-map NODE 'headline (lambda (hl) (when (string-equal (org-element-property :raw-title hl) VALUE) hl))))
 
 (defun org-todoist--get-position (NODE PROPERTY)
+  "Get the numeric value of `PROPERTY' under `NODE'."
   (let ((val (org-todoist--get-prop NODE PROPERTY)))
     (if (stringp val) (string-to-number val) val)))
 
 (defun org-todoist--sort-by-child-order (NODE PROPERTY &optional TYPE)
+  "WIP Sort children of `TYPE' under `NODE' by numeric `PROPERTY'."
   nil
   ;; (let* ((children (org-element-map NODE 'headline
   ;;                    (lambda (hl) (when (and (eq (org-todoist--first-parent-of-type hl 'headline) NODE)
@@ -1228,6 +1422,7 @@ timestamp"
   )
 
 (defun org-todoist--set-effort (NODE TASK)
+  "Set the EFFORT property of `NODE' using the API response data `TASK'."
   (when-let* ((duration (assoc-default 'duration TASK))
               (amount (assoc-default 'amount duration))
               (unit (assoc-default 'unit duration))
@@ -1238,6 +1433,7 @@ timestamp"
     (org-todoist--add-prop NODE "EFFORT" (org-duration-from-minutes effortval))))
 
 (defun org-todoist--set-priority (NODE PRIORITY)
+  "Set priority of `NODE' to equivalent of Todoist `PRIORITY'."
   (org-element-put-property NODE :priority (cond
                                             ((equal PRIORITY 4) ?A)
                                             ((equal PRIORITY 3) ?B)
@@ -1245,10 +1441,12 @@ timestamp"
                                             ((equal PRIORITY 1) ?D))))
 
 (defun org-todoist--get-priority (NODE)
+  "Get the Todoist priority level of `NODE'."
   (let ((priority (org-element-property :priority NODE)))
     (org-todoist--get-priority-cond priority)))
 
 (defun org-todoist--get-priority-cond (priority)
+  "Get the Todoist priority level of `PRIORITY'."
   (cond
    ((equal priority ?A) 4)
    ((equal priority ?B) 3)
@@ -1257,6 +1455,8 @@ timestamp"
    (t (org-todoist--get-priority-cond org-priority-default))))
 
 (defun org-todoist--set-todo (NODE CHECKED &optional DELETED)
+  "Set the TODO state of `NODE' from the `CHECKED' and `DELETED' properties.
+`CHECKED' and `DELETED' are from the Todoist API response."
   (if (or (eql t CHECKED) ;; :json-false for false currently, t for true
           (eql t DELETED))
       (progn
@@ -1266,7 +1466,7 @@ timestamp"
     (org-element-put-property NODE :todo-type 'todo)))
 
 (defun org-todoist--root (NODE)
-  "Gets the syntax root of NODE"
+  "Gets the syntax root of `NODE'."
   (let ((root NODE))
     (while-let ((next (org-element-parent root)))
       (setq root next))
@@ -1278,7 +1478,7 @@ timestamp"
 ;;     (org-todoist--add-tag NODE (concat  "@" (string-replace " " "_" name)))))
 
 (defun org-todoist--add-tag (NODE TAG)
-  "Adds a TAG to a NODE"
+  "Adds a `TAG' to a `NODE'."
   (let ((tags (org-element-property :tags NODE)))
     (if (null tags)
         (org-element-put-property NODE :tags `(,TAG))
@@ -1286,15 +1486,15 @@ timestamp"
         (push TAG tags)))))
 
 (defun org-todoist--archive (NODE)
-  "Archives NODE via tag"
+  "Archives `NODE' via the `org-archive-tag' tag."
   (org-todoist--add-tag NODE org-archive-tag))
 
 (defun org-todoist--get-description-elements (NODE)
-  "Gets all paragraph elements that are not in a drawer."
+  "Gets all paragraph elements under `NODE' that are not in a drawer."
   (org-element-map NODE t (lambda (node) (when (org-todoist--is-description-element node NODE) node)) nil nil 'drawer))
 
 (defun org-todoist--is-description-element (NODE PARENT)
-  "t if the NODE is a paragraph element and is not in a drawer."
+  "T if the `NODE' is a paragraph element not in a drawer directly under `PARENT'."
   ;; TODO this doesn't seem to be working properly. Doesn't filter out items in drawers.
   (when (and
          ;; Is a paragraph element
@@ -1306,12 +1506,12 @@ timestamp"
     NODE))
 
 (defun org-todoist--description-text (NODE)
-  "Combines all paragraphs under NODE and returns the concatenated string"
+  "Combine all paragraphs under `NODE' and return the concatenated string."
   (mapconcat #'org-todoist-org-element-to-string (org-todoist--get-description-elements NODE)))
 
 (defun org-todoist--category-node-query-or-create (AST DEFAULT TYPE)
-  "Finds the first node of TODOIST_TYPE TYPE under AST, else create it with
-DEFAULT text."
+  "Find or create the first node of TODOIST_TYPE `TYPE' under `AST'.
+If created, use `DEFAULT' text."
   (let ((target (org-todoist--find-node (lambda (node) (when (org-todoist--node-type-query node TYPE) node)) AST))
         (level (org-element-lineage-map AST (lambda (hl) (org-element-property :level hl)) 'headline t t)))
     (if target
@@ -1322,10 +1522,11 @@ DEFAULT text."
       target)))
 
 (defun org-todoist--node-type-query (NODE TYPE)
+  "T if `NODE' has `org-todoist--type' `TYPE'."
   (when (equal (org-todoist--get-prop NODE org-todoist--type) TYPE) NODE))
 
 (defun org-todoist--update-file (AST)
-  "Replaces the org-todoist file with the org representation AST"
+  "Replaces the org-todoist file with the org representation `AST'."
   (with-current-buffer
       (org-todoist--get-todoist-buffer)
     (erase-buffer)
@@ -1333,7 +1534,7 @@ DEFAULT text."
     (save-buffer)))
 
 (defun org-todoist--file-ast ()
-  "Parses the AST of the org-todoist-file"
+  "Parse the AST of the `'org-todoist-file'."
   (save-current-buffer
     (let ((created (not (file-exists-p (org-todoist-file)))))
       (with-current-buffer (org-todoist--get-todoist-buffer)
@@ -1343,12 +1544,12 @@ DEFAULT text."
 
                                         ;Find node;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--find-node (QUERY AST)
-  "Return the first headling in the syntax tree AST which matches QUERY.
-QUERY takes a single argument which is the current node."
+  "Return the first headling in the syntax tree `AST' which matches `QUERY'.
+`QUERY' takes a single argument which is the current node."
   (org-element-map AST 'headline (lambda (node) (when (funcall QUERY node) node)) nil t))
 
 (defun org-todoist--get-by-id (TYPE ID AST)
-  "Finds the first item of TODOIST_TYPE TYPE with id ID in the syntax tree AST."
+  "Find the first item of TODOIST_TYPE `TYPE' with `ID' in the syntax tree `AST'."
   (when ID
     (org-element-map AST 'headline
       (lambda (hl) (when (and (or (null TYPE)
@@ -1357,88 +1558,79 @@ QUERY takes a single argument which is the current node."
                      hl))
       nil t)))
 
-(defun org-todoist--get-by-tempid (ID TID_MAPPING AST)
-  "Finds the item in AST corresponding to the given ID using the headlines TEMP_ID property
-and the TID_MAPPING. Add PROPS not including SKIP to found node."
-  (let* ((id (cl-dolist (elem TID_MAPPING)
-               (when (equal ID (cdr elem))
-                 (cl-return (car elem)))))
-         (elem (org-element-map AST 'headline (lambda (hl)
-                                                (let ((prop (org-element-property :TEMP_ID hl))) ;; TODO from drawer? may not work? not used atm
-                                                  (when (and prop (string-equal prop id)) hl)))
-                                nil t)))
-    elem))
-;; (when elem (org-todoist--add-all-properties elem PROPS SKIP) elem)))
-
 (defun org-todoist--id-or-temp-id (NODE)
+  "Get the `org-todoist--id-property' or \"temp_id\" property of `NODE'."
   (let ((id (org-todoist--get-prop NODE org-todoist--id-property)))
     (if id
         id
       (org-todoist--get-prop NODE "temp_id"))))
 
 (defun org-todoist--get-project-id-position (NODE)
-  "Gets the ID of the project headline the NODE is under."
+  "Gets the ID of the project headline the `NODE' is under."
   (org-todoist--id-or-temp-id (org-todoist--get-parent-of-type org-todoist--project-type NODE t)))
 
 (defun org-todoist--get-section-id-position (NODE)
-  "Gets the ID of the section headline the NODE is under."
+  "Gets the ID of the section headline the `NODE' is under."
   (org-todoist--id-or-temp-id (org-todoist--get-parent-of-type org-todoist--section-type NODE t)))
 
 (defun org-todoist--get-task-id-position (NODE)
-  "Gets the ID of the task headline the NODE is under."
+  "Gets the ID of the task headline the `NODE' is under."
   (org-todoist--id-or-temp-id (org-todoist--get-parent-of-type org-todoist--task-type NODE t)))
 
 (defun org-todoist--get-parent-of-type (TYPE NODE &optional FIRST)
-  "Gets the parent(s) of NODE with TODOIST_TYPE TYPE. If FIRST, only get the first
-matching parent."
+  "Gets the parent(s) of `NODE' with TODOIST_TYPE `TYPE'.
+If `FIRST', only get the first matching parent."
   (org-element-lineage-map NODE
       (lambda (parent) (when (string= (org-todoist--get-todoist-type parent) TYPE)
                          parent))
     'headline nil FIRST))
 
 (defun org-todoist--get-parent-of-element-type (TYPE NODE)
-  "Gets the parent(s) of NODE with org-element-type TYPE."
+  "Gets the parent(s) of `NODE' with org-element-type `TYPE'."
   (org-element-lineage-map NODE
       (lambda (parent) (when (and (not (eq NODE parent))) (eq (org-element-type NODE) TYPE)
                              parent))
     'headline nil t))
 
 (defun org-todoist--get-hl-level-at-point ()
+  "Get the level of the closest headline above the cursor."
   (org-element-property :level (org-todoist--get-parent-of-element-type 'headline (org-element-at-point))))
-
-
-(defun org-todoist--unimplemented () (error "Unimplemented feature!"))
 
                                         ;Property get/set;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--insert-id (NODE ID)
+  "Insert `ID' as property `org-todoist--id-property' under `NODE'."
   (org-todoist--add-prop NODE org-todoist--id-property ID)
   NODE)
 
 (defun org-todoist--insert-identifier (NODE IDENTIFIER)
-  "Inserts a property into the node's property drawer identifying the org-todoist i
-node. Returns the modified element."
+  "Insert `IDENTIFIER' as property `org-todoist--type' under `NODE'."
   (org-todoist--add-prop NODE org-todoist--type IDENTIFIER)
   NODE)
 
 (defun org-todoist--get-property-drawer (NODE)
+  "Get the property drawer for `NODE'."
   (org-element-map NODE 'property-drawer
     (lambda (node) (when (eq NODE (org-todoist--first-parent-of-type node 'headline)) node))
     nil t))
 
-(defun org-todoist--create-property (KEY VALUE) (org-element-create 'node-property `(:key ,KEY :value ,VALUE)))
+(defun org-todoist--create-property (KEY VALUE)
+  "Create node-property element with :key `KEY' and :value `VALUE'."
+  (org-element-create 'node-property `(:key ,KEY :value ,VALUE)))
 
 (defun org-todoist--property-exists (NODE KEY)
+  "T if `NODE' has property with `KEY' in its property drawer."
   (unless (equal (org-element-type NODE) 'property-drawer)
     (error "Can only be called on property drawer elements")
     (org-element-map NODE 'node-property (lambda (prop) (org-todoist--is-property prop KEY)))))
 
 (defun org-todoist--is-property (NODE KEY)
+  "T if node-property element `NODE' has :key equivalent to `KEY'."
   (when (eq (org-element-type NODE) 'node-property)
     (let ((prop (org-element-property :key NODE)))
       (string-equal-ignore-case (if (not (stringp prop)) (prin1-to-string prop) prop) (if (stringp KEY) KEY (symbol-name KEY))))))
 
 (defun org-todoist--set-prop-in-place (DRAWER KEY VALUE)
-  "Checks for property KEY in DRAWER and replaces with VALUE if the key is present."
+  "Check for property `KEY' in `DRAWER' and replace value with `VALUE' if present."
   (when (not (eq (org-element-type DRAWER) 'property-drawer))
     (error "Expected property drawer"))
   (let ((existing (org-element-map DRAWER 'node-property
@@ -1449,6 +1641,8 @@ node. Returns the modified element."
       (org-element-adopt DRAWER (org-todoist--create-property KEY VALUE)))))
 
 (defun org-todoist--get-key (KEY)
+  "Get the org property key for given `KEY'.
+This peforms any property name mapping between Todoist and org representations."
   (if (or (eq KEY 'id)
           (and (stringp KEY)
                (string-equal-ignore-case KEY "id")))
@@ -1456,14 +1650,15 @@ node. Returns the modified element."
     KEY))
 
 (defun org-todoist--get-value (VALUE)
+  "Get `VALUE' as its string representation."
   (if (stringp VALUE)
       VALUE
     (prin1-to-string VALUE)))
 
 (defun org-todoist--add-prop (DRAWER KEY VALUE)
-  "Adds property with KEY and VALUE to property-drawer DRAWER.
-If DRAWER is another node type, create and adopt a new property drawer.
-Replaces the current value with VALUE if property KEY already exists."
+  "Add property with `KEY' and `VALUE' to property-drawer `DRAWER'.
+If `DRAWER' is another node type, create and adopt a new property drawer.
+Replaces the current value with `VALUE' if property `KEY' already exists."
   (let ((key (org-todoist--get-key KEY))
         (value (org-todoist--get-value VALUE))
         (type (org-element-type DRAWER)))
@@ -1482,7 +1677,7 @@ Replaces the current value with VALUE if property KEY already exists."
           (t (signal 'todoist--error "Called org-todoist--add-prop with invalid type")))))
 
 (defun org-todoist--get-prop (NODE KEY)
-  "Retrieves the property KEY from the property drawer directly under NODE.
+  "Retrieves the property `KEY' from the property drawer directly under `NODE'.
 Returns nil if not present"
   (let ((drawer (if (equal (org-element-type NODE) 'property-drawer)
                     NODE
@@ -1495,15 +1690,17 @@ Returns nil if not present"
       nil t)))
 
 (defun org-todoist--add-all-properties (NODE PROPERTIES &optional SKIP)
-  "Adds or updates the values of all properties in the alist PROPERTIES to
-NODE unless they are in plist SKIP. RETURNS the mutated NODE."
+  "Add or update the values of all properties in the alist `PROPERTIES'.
+Properties are added to `NODE' unless they are in plist `SKIP'.
+RETURNS the mutated `NODE'."
   (dolist (kv PROPERTIES)
     (unless (member (car kv) SKIP)
       (org-todoist--add-prop NODE (car kv) (cdr kv))))
   NODE)
 
 (defun org-todoist--get-todoist-type (NODE &optional NO-INFER)
-  "Gets the TODOIST_TYPE of a NODE."
+  "Gets the TODOIST_TYPE of a `NODE'.
+When `NO-INFER', do not attempt to guess the type of `NODE'."
   (if NO-INFER
       (org-todoist--get-prop NODE org-todoist--type)
     (cond
@@ -1529,70 +1726,92 @@ NODE unless they are in plist SKIP. RETURNS the mutated NODE."
              (t org-todoist--project-type)))))))
 
 (defun org-todoist--get-prop-elem (NODE KEY)
-  "Gets the org-element property KEY of NODE."
+  "Gets the org-element property `KEY' of `NODE' as a string."
   (org-todoist-org-element-to-string (org-element-property KEY NODE)))
 
 (defun org-todoist-org-element-to-string (DATA)
-  "Converts DATA (an org-element or tree) to its content string. Note, a \n character is appended if not present."
+  "Convert `DATA' (an org-element or tree) to its string representation.
+Note, a \n character is appended if not present."
   (substring-no-properties (org-element-interpret-data DATA)))
 
-                                        ;Test utils;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun file-to-string (file)
-  "Read FILE as a string"
-  (with-temp-buffer
-    (insert-file-contents file)
-    (buffer-string)))
-
-(defun org-todoist--remove-ws-and-newline (STRING) (string-replace "\n" ""(string-replace " " "" STRING))) ;; TODO replace-regexp
-(defun org-todoist--remove-ws (STRING) (string-replace " " "" STRING))
-
-(defun org-todoist--generate-ast (contents) (org-todoist--invoke-with-buffer contents #'org-element-parse-buffer))
-
-(defun org-todoist-org-element-to-string-no-ws (DATA)
-  "Converts DATA (an org-element or tree) to its content string. Note, a \n character is appended if not present."
-  (org-todoist--remove-ws (substring-no-properties (org-element-interpret-data DATA))))
-
-(defun org-todoist--element-equals-str (STR DATA)
-  "Returns t if the org string from org-element-interpret-data for DATA is STR."
-  (string-equal-ignore-case (org-todoist--remove-ws STR) (org-todoist--remove-ws (org-todoist-org-element-to-string DATA))))
-
-(defun org-todoist--invoke-with-buffer (CONTENTS FN)
-  "Fills a temp buffer with CONTENTS, applies org-mode, and calls FN."
-  (with-temp-buffer (insert CONTENTS) (org-mode) (funcall FN)))
+(defun org-todoist--remove-ws (STRING)
+  "Remove spaces from `STRING'."
+  (string-replace " " "" STRING))
 
 ;; User functions
 
+;;;###autoload
 (defun org-todoist-unassign-task ()
+  "Unassign the task at point by setting the \"responsible_uid\" property to nil."
   (interactive)
-  (org-set-property "responsible_uid" "nil"))
+  (when (org-entry-get nil "responsible_uid")
+    (org-set-property "responsible_uid" "nil")))
 
+;;;###autoload
 (defun org-todoist-ignore-subtree ()
+  "Do not push the subtree at point to Todoist.
+
+Only works on subtrees which are not already tracked by Todoist.
+Done by settings the `org-todoist-type' propety of the headline at point
+to the `org-todoist--ignored-node-type'."
   (interactive)
-  (org-set-property org-todoist--type org-todoist--ignored-node-type))
+  (if (org-entry-get nil org-todoist--type)
+      (message "Can't ignore subtrees that are already tracked by Todoist!")
+    (org-set-property org-todoist--type org-todoist--ignored-node-type)))
 
+;;;###autoload
 (defun org-todoist-add-subproject (ARG)
+  "Add a new subproject to project at point.
+`ARG' is passed to `org-insert-subheading'."
   (interactive "P")
-  (org-insert-subheading ARG)
-  (org-set-property org-todoist--type org-todoist--project-type))
+  (let ((type (org-entry-get nil org-todoist--type)))
+    (if (and type (not (string= type org-todoist--project-type))) ; if there is no type, assume it is probably a new project.
+        (message "Can only add subproject to project headlines!")
+      (org-insert-subheading ARG)
+      (org-set-property org-todoist--type org-todoist--project-type))))
 
+;;;###autoload
 (defun org-todoist-tag-user ()
+  "Tag a Todoist collaborator in the current comment and notify them on next sync."
   (interactive)
   (when-let ((selectedelement (org-todoist--select-user "Tag: ")))
     (if org-todoist-comment-tag-user-pretty
         (insert (concat "[[" (org-element-property :raw-value selectedelement) "][todoist-mention://" (org-todoist--id-or-temp-id selectedelement) "]"))
       (insert (concat "[" (org-element-property :raw-value selectedelement) "](todoist-mention://" (org-todoist--id-or-temp-id selectedelement) ")")))))
 
+;;;###autoload
 (defun org-todoist-assign-task ()
+  "Prompt for collaborator selection and assign the task at point to them."
   (interactive)
-  ;; TODO limit to just tasks, but allow assigning for tasks that haven't been added to Todoist yet
-  (when-let ((selectedelement (org-todoist--select-user "Assign to: ")))
-    (org-set-property "responsible_uid" (org-todoist--get-prop selectedelement org-todoist--id-property))))
+  (let ((type (org-entry-get nil org-todoist--type)))
+    (if (and type (not (string= type org-todoist--task-type))) ; if there is no type, assume it is probably a new task.
+        (message "Can only assign users to task headlines")
+      (when-let ((selectedelement (org-todoist--select-user "Assign to: ")))
+        (org-set-property "responsible_uid" (org-todoist--get-prop selectedelement org-todoist--id-property))))))
 
+;;;###autoload
 (defun org-todoist-sync (&optional ARG)
+  "Perform a bidirectional incremental sync of the `org-todoist-file' with Todoist.
+
+The commands to apply will be determined by diffing the copy of the
+`org-todoist-file'saved during the last sync with the current version
+of the file. Commands are processed prior to fetching, thus local
+changes will overwrite remote changes.
+
+With `ARG', do not open the `org-todoist-file' buffer after sync."
   (interactive "P")
   (org-todoist--do-sync (org-todoist--get-sync-token) (null ARG)))
 
-(defun org-todoist-reset (&optional ARG)
+(defun org-todoist--reset (&optional ARG)
+  "Delete the `org-todoist-file' and perform a full sync from Todoist.
+
+NOTE this will irreversibly discard all data not stored in Todoist
+\(e.g., time tracking information and ignored subtrees.\).
+
+This function is often used in development, but end users will likely
+have no need for it.
+
+With `ARG', do not open the `org-todoist-file' buffer after sync."
   (interactive "P")
   (when (get-buffer org-todoist-file)
     (kill-buffer org-todoist-file))
