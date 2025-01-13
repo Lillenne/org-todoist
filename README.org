@@ -59,10 +59,11 @@ Sample capture templates:
          ("i" "Inbox" entry
          (file+olp ,(org-todoist-file) ,org-todoist-project-headline "Inbox" "Default")
          "* TODO %?")
-         ;; Capture to a specific project or section, prompting for tags, effort, task assignment, scheduled, and deadline times
+         ;; Capture to a specific project, section, and parent task, creating them if needed.
+         ;; Also prompts for tags, effort, task assignment, scheduled, and deadline times
          ;; Projects are determined by projectile if possible, otherwise via and interactive prompt
-        ("p" "Select Project and Section" entry (function org-todoist--find-project-and-section)
-         "* TODO %? %^G %^{EFFORT}p %(org-todoist-assign-task) \nSCHEDULED: %^{Scheduled}t DEADLINE: %^{Deadline}t"))
+        ("p" "Select project, section, and parent" entry (function org-todoist--find-project-and-section)
+         "* TODO %^{What is the task} %^G %^{EFFORT}p %(org-todoist-assign-task) %(progn (org-schedule nil) nil) %(progn (org-deadline nil) nil)\n%?")
 #+end_src
 
 ** Collaboration

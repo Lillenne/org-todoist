@@ -100,13 +100,13 @@ this directory must be accessible on all PCs")
 (defconst org-todoist--sync-buffer-file "SYNC-BUFFER")
 
                                         ;Hooks;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun org-todoist--item-close-hook ()
-  (when (and (equal org-state org-todoist-done-keyword)
-             (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point))))
-    ;; TODO send only item complete command. Remove item_update for recurring tasks?
-    ;; (org-todoist-sync nil)
-    ))
-(add-hook 'org-after-todo-state-change-hook 'org-todoist--item-close-hook) ;; TODO this requires it to be done from emacs and not eg. orgzly
+;; (defun org-todoist--item-close-hook ()
+;;   (when (and (equal org-state org-todoist-done-keyword)
+;;              (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point))))
+;;     ;; TODO send only item complete command. Remove item_update for recurring tasks?
+;;     ;; (org-todoist-sync nil)
+;;     ))
+;; (add-hook 'org-after-todo-state-change-hook 'org-todoist--item-close-hook) ;; TODO this requires it to be done from emacs and not eg. orgzly
 
 (add-to-list 'org-fold-show-context-detail '(todoist . lineage))
 
@@ -119,27 +119,43 @@ this directory must be accessible on all PCs")
         (when (string= (buffer-file-name) (org-todoist-file))
           (org-todoist-sync t))))))
 
+(defun org-todoist--get-selection (NODES PROMPT &optional SELECTION)
+  (let* ((names (unless SELECTION (--map (org-element-property :raw-value it) NODES)))
+         (selected (or SELECTION (completing-read PROMPT names)))
+         (selected-element (--first (string= (org-element-property :raw-value it) selected) NODES)))
+    `(,selected ,selected-element)))
+
 (defun org-todoist--find-project-and-section ()
   (unless org-note-abort
-    (let* ((ast (org-todoist--file-ast))
+    (let* ((headlines nil)
+           (ast (org-todoist--file-ast))
            (projects (org-todoist--project-nodes ast)) ;; TODO create projects via projectile?
            (project-names (--map (org-element-property :raw-value it) projects))
-           (selected-proj (if (not (string= "-" (projectile-project-name)))
-                              (projectile-project-name)
-                            (completing-read "Which project? " project-names)))
-           (selected-proj-element (--first (string= (org-element-property :raw-value it) selected-proj) projects))
-           (sections (org-todoist--get-sections selected-proj-element))
+           (selected-project (if (string= (projectile-project-name) "-") (completing-read "Which project? " project-names) (projectile-project-name)))
+           (selected-project-element (--first (string= (org-element-property :raw-value it) selected-project) projects))
+
+           (sections (when selected-project-element (org-todoist--get-sections selected-project-element)))
            (section-names (--map (org-element-property :raw-value it) sections))
-           (selected-section (completing-read "Which section? " section-names)))
-      (goto-char (point-min))
+           (selected-section (completing-read "Which section? " (or section-names `(,org-todoist--default-section-name))))
+           (selected-section-element (--first (string= (org-element-property :raw-value it) selected-section) sections))
+
+           (tasks (when selected-section-element (org-todoist--get-tasks-all selected-section-element)))
+           (task-names (--map (org-element-property :raw-value it) tasks))
+           (selected-task (when task-names (completing-read "Which parent task? " task-names)))
+           (selected-task-element (--first (string= (org-element-property :raw-value it) selected-task) tasks)))
+      (unless (s-blank? selected-task) (push selected-task headlines)
+              (while-let ((parent-task (org-todoist--get-parent-of-type org-todoist--task-type selected-task-element t)))
+                (push (org-todoist--get-title parent-task) headlines)
+                (setq selected-task-element parent-task)))
+      (push (if (s-blank? selected-section) org-todoist--default-section-name selected-section) headlines)
+      (push (if (s-blank? selected-project) "Inbox" selected-project) headlines)
+      (while-let ((parent-proj (org-todoist--get-parent-of-type org-todoist--project-type selected-project-element t)))
+        (push (org-todoist--get-title parent-proj) headlines)
+        (setq selected-project-element parent-proj))
+      (push org-todoist-project-headline headlines)
       (set-buffer (org-capture-target-buffer (org-todoist-file)))
-      (let ((headlines `(,org-todoist-project-headline))
-            (parent-id (org-todoist--get-project-id-position selected-proj-element)))
-        (unless (string= parent-id "nil")
-          (nconc headlines `(,(org-todoist--get-title (org-todoist--get-by-id org-todoist--project-type parent-id ast)))))
-        (nconc headlines `(,(if (s-blank? selected-proj) "Inbox" selected-proj)
-                           ,(if (s-blank? selected-section) org-todoist--default-section-name selected-section)))
-        (+org--capture-ensure-heading headlines)))))
+      (goto-char (point-min))
+      (+org--capture-ensure-heading headlines))))
 
 (add-hook 'org-capture-after-finalize-hook #'org-todoist--sync-after-capture)
 
@@ -213,7 +229,7 @@ this directory must be accessible on all PCs")
             (userelements (org-element-map (org-todoist--user-node ast) 'headline
                             (lambda (node) (when (org-todoist--node-type-query node org-todoist--collaborator-type) node))))
             (usernames (--map (org-element-property :raw-value it) userelements))
-            (selected (completing-read TEXT usernames))
+            (selected (completing-read TEXT usernames nil t))
             (selectedelement (--first (string= (org-element-property :raw-value it) selected) userelements)))
       selectedelement))
 
@@ -879,8 +895,17 @@ the wrong headline!"
         (let ((default-section (org-todoist--create-node org-todoist--section-type org-todoist--default-section-name nil nil proj)))
           (org-todoist--add-prop default-section org-todoist--id-property org-todoist--default-id))))))
 
+(defun org-todoist--get-tasks (ITEM)
+  (org-element-map (org-element-contents ITEM) 'headline (lambda (hl) (when (and (string= (org-todoist--get-todoist-type hl) org-todoist--task-type)
+                                                                                 (eq ITEM (org-todoist--first-parent-of-type hl 'headline)))
+                                                                        hl))))
+
+(defun org-todoist--get-tasks-all (ITEM)
+  (org-element-map (org-element-contents ITEM) 'headline (lambda (hl) (when (string= (org-todoist--get-todoist-type hl) org-todoist--task-type)
+                                                                        hl))))
+
 (defun org-todoist--get-sections (PROJECT)
-  (org-element-map PROJECT 'headline (lambda (hl) (when (string= (org-todoist--get-todoist-type hl) org-todoist--section-type) hl))))
+  (org-element-map (org-element-contents PROJECT) 'headline (lambda (hl) (when (string= (org-todoist--get-todoist-type hl) org-todoist--section-type) hl))))
 
 (defun org-todoist--get-title (NODE)
   (let ((title (org-element-property :title NODE)))
@@ -1330,7 +1355,7 @@ and the TID_MAPPING. Add PROPS not including SKIP to found node."
   "Gets the parent(s) of NODE with TODOIST_TYPE TYPE. If FIRST, only get the first
 matching parent."
   (org-element-lineage-map NODE
-      (lambda (parent) (when (equal (org-todoist--get-todoist-type parent) TYPE)
+      (lambda (parent) (when (string= (org-todoist--get-todoist-type parent) TYPE)
                          parent))
     'headline nil FIRST))
 
