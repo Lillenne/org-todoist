@@ -111,12 +111,12 @@ Sample capture templates:
 (setq org-capture-templates `(
         ;; Capture directly to the inbox
          ("i" "Inbox" entry
-         (file+olp ,(org-todoist-file) "Inbox" "Default")
+         (file+olp ,(org-todoist-file) "Inbox" ,org-todoist--default-section-name)
          "* TODO %?")
          ;; Capture to a specific project, section, and parent task, creating them if needed.
          ;; Also prompts for tags, effort, task assignment, scheduled, and deadline times
          ;; Projects are determined by projectile if possible, otherwise via an interactive prompt
-        ("p" "Select project, section, and parent" entry (function org-todoist--find-project-and-section)
+        ("p" "Select project, section, and parent task" entry (function org-todoist--find-project-and-section)
          "* TODO %^{What is the task} %^G %^{EFFORT}p %(org-todoist-assign-task) %(progn (org-schedule nil) nil) %(progn (org-deadline nil) nil)\n%?")
 #+end_src
 
