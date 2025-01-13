@@ -9,7 +9,7 @@
 ;; Version: 0.0.1
 ;; Keywords: calendar org todoist
 ;; Homepage: https://github.com/lillenne/org-todoist
-;; Package-Requires: ((emacs "29.1") (s "1.13.1") (org "9.4") (ts "0.3") (dash "2.19.1") (json "1.5"))
+;; Package-Requires: ((emacs "29.1") (s "1.13.1") (org "9.7") (ts "0.3") (dash "2.19.1"))
 ;;
 ;; This file is not part of GNU Emacs.
 ;;
