@@ -16,7 +16,7 @@ An *Emacs package for bidirectional incremental sync* of [[https://orgmode.org/]
   - Priority
   - Descriptions
   - Tags/Labels
-  - Notes/Comments
+  - Notes/Comments + send notifications to other users
   - Repeating tasks[fn:2]
   - Assignee[fn:3]
   - Retains LOGBOOK information (/e.g.,/ clocking)
@@ -48,33 +48,42 @@ Syncing is done using the [[https://developer.todoist.com/sync/v9/#overview][Tod
 #+end_src
 
 *Local changes will overwrite remote changes!*
+** Mapping org headlines to Todoist objects
 
-** Org capture to a Todoist project section
-/Captures will automatically sync by default/ via the ~org-capture-finalize-hook~.
+| Org                       | Todoist                     |
+|---------------------------+-----------------------------|
+| Headline                  | Project, Section, or Task   |
+| Plain-text under headline | Description                 |
+| Scheduled                 | Due                         |
+| Deadline                  | Deadline                    |
+| Effort                    | Duration                    |
+| Priority                  | Priority                    |
+| Todo-state + Todo-keyword | Checked, Deleted            |
+| Tags (+inherited)         | Labels                      |
+| org-archive-tag           | Archive projects + sections |
+| Responsible UID property  | Assignee                    |
 
-Sample capture templates:
-#+begin_src emacs-lisp
-(setq org-capture-templates `(
-        ;; Capture directly to the inbox
-         ("i" "Inbox" entry
-         (file+olp ,(org-todoist-file) ,org-todoist-project-headline "Inbox" "Default")
-         "* TODO %?")
-         ;; Capture to a specific project, section, and parent task, creating them if needed.
-         ;; Also prompts for tags, effort, task assignment, scheduled, and deadline times
-         ;; Projects are determined by projectile if possible, otherwise via and interactive prompt
-        ("p" "Select project, section, and parent" entry (function org-todoist--find-project-and-section)
-         "* TODO %^{What is the task} %^G %^{EFFORT}p %(org-todoist-assign-task) %(progn (org-schedule nil) nil) %(progn (org-deadline nil) nil)\n%?")
-#+end_src
+ [[Creating projects, subprojects, sections, tasks, and subtasks][See the next section to learn the mapping rules for projects, sections, and tasks.]]
+** Creating projects, subprojects, sections, tasks, and subtasks
+Simply create org headlines! The corresponding Todoist types (projects, subprojects, sections, tasks, and subtasks) will be inferred from the org structure. Sections will be preferred over subprojects unless the ~TODOIST_TYPE~ property is set to ~PROJECT~. A new subproject can be created quickly using the interactive function ~org-todoist-add-subproject~. If a TODO item does not fall under a project, it will be assigned to the default section of the Inbox project.
 
-** Collaboration
-*** Assigning Tasks
-#+begin_src emacs-lisp
-(org-todoist-assign-task) ;; Prompts for user selection and changes the responsible uid property to the user's id
-(org-todoist-unassign-task) ;; Removes the responsibile uid property
-#+end_src
+| Level | Todoist Type          |
+|-------+-----------------------|
+|     1 | Project               |
+|    2+ | Section or Subproject |
+|  TODO | Task                  |
 
-[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/assign.png]]
-*** Notifying users in comments
+** Updating projects, sections, and tasks
+Updating items happens automatically when updating any headline, description, todo-state, todo-keyword[fn:4], priority, effort, tag, scheduled time, deadline time, or assignee OR when any project, section, or task is moved under another headline. /This works with standard org commands (e.g., ~org-refile~)./
+** Deleting items
+When the ~org-todoist-delete-remote-items~ variable is non-nil, removing items from the ~org-todoist-file~ (via deletion or refiling) will cause them to be deleted from Todoist. Additionally, items can be deleted by changing their ~todo-keyword~ to the ~org-todoist-deleted-keyword~.
+** Tags, labels, and archiving
+Org tags are mapped directly to Todoist labels and support inherited tags. Note, inherited tags will also be applied directly to the child tasks on next sync.
+
+Projects and sections can be archived in Todoist by applying the ~org-archive-tag~ to the headline.
+** Comments and notifications
+Comments are done via ~org-add-note~ and currently ([2025-01-12 Sun]) do not support editing or deletion from org mode. Within comments, other users can be notified via the ~org-todoist-tag-user~ command, which will prompt for completion of the desired user, send a request to notify them in the comment's note_add command, and input a special markdown syntax into the comment which will property display as @<User> in the Todoist app. If you prefer to use the org link syntax and have it look funny in the Todoist app, set ~org-todoist-comment-tag-user-pretty~ to non-nil.
+
 #+begin_src emacs-lisp
 ;; Inserts the special tag from the todoist app that formats to @User
 ;; & adds the user id to uids_to_notify in the request
@@ -83,6 +92,34 @@ Sample capture templates:
 ;; non-nil to format in org link syntax instead of markdown for better viewing in org but worse in the Todoist app
 (setq org-todoist-comment-tag-user-pretty nil)
 #+end_src
+
+** Assigning Tasks
+#+begin_src emacs-lisp
+(org-todoist-assign-task) ;; Prompts for user selection and changes the responsible uid property to the user's id
+(org-todoist-unassign-task) ;; Removes the responsibile uid property
+#+end_src
+
+[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/assign.png]]
+** Ignoring subtrees
+If you'd like to keep other notes or TODOs alongside your projects and not have them synced to Todoist, you can mark a subtree as ignored by setting the ~TODOIST_TYPE~ property to ~IGNORED~. Any org element descendent from an ignored node will not have its changes pushed to Todoist.
+
+** Org capture to a Todoist project section
+/Captures will automatically sync by default/ via the ~org-capture-finalize-hook~. If you would like to change this behavior, run ~(remove-hook 'org-capture-after-finalize-hook #'org-todoist--sync-after-capture)~.
+
+Sample capture templates:
+#+begin_src emacs-lisp
+(setq org-capture-templates `(
+        ;; Capture directly to the inbox
+         ("i" "Inbox" entry
+         (file+olp ,(org-todoist-file) "Inbox" "Default")
+         "* TODO %?")
+         ;; Capture to a specific project, section, and parent task, creating them if needed.
+         ;; Also prompts for tags, effort, task assignment, scheduled, and deadline times
+         ;; Projects are determined by projectile if possible, otherwise via an interactive prompt
+        ("p" "Select project, section, and parent" entry (function org-todoist--find-project-and-section)
+         "* TODO %^{What is the task} %^G %^{EFFORT}p %(org-todoist-assign-task) %(progn (org-schedule nil) nil) %(progn (org-deadline nil) nil)\n%?")
+#+end_src
+
 ** (Currently) unsupported features
 [X] = Implemented
 
@@ -192,8 +229,11 @@ This package is not associated with, created by, or endorsed by [[https://doist.
 This is my first major elisp project, so I am almost certainly missing some best practices and useful tools. If you have any knowledge to share or want to contribute, please reach out, create an issue, or open a PR!
 
 * Footnotes
-[fn:1] CRUD: create, read, update, delete
+
+[fn:1] CRUD: create, read, update, delete.
 
 [fn:2] Recurring tasks only support a subset of Todoist scheduling features. e.g. Todoists "every mon, fri" is not easily recreatable using org mode. These tasks should still be pulled down correctly from Todoist on next sync.
 
-[fn:3] Assignee is a Todoist-only idea, but is supported via the [[Collaboration]] commands
+[fn:3] Assignee is a Todoist-only idea, but is supported via the [[Collaboration]] commands.
+
+[fn:4] Changing todo-keywords only triggers an update if the todo-state changes or the keyword is the ~org-todoist-deleted-keyword~.
