@@ -80,7 +80,7 @@ When the ~org-todoist-delete-remote-items~ variable is non-nil, removing items f
 ** Tags, labels, and archiving
 Org tags are mapped directly to Todoist labels and support inherited tags. Note, inherited tags will also be applied directly to the child tasks on next sync.
 
-Projects and sections can be archived in Todoist by applying the ~org-archive-tag~ to the headline.
+Projects and sections can be archived in Todoist by applying the ~org-archive-tag~ to the headline. Note, you cannot archive the default section and if you do locally on your org document it will not be synced.
 ** Comments and notifications
 Comments are done via ~org-add-note~ and currently ([2025-01-12 Sun]) do not support editing or deletion from org mode. Within comments, other users can be notified via the ~org-todoist-tag-user~ command, which will prompt for completion of the desired user, send a request to notify them in the comment's note_add command, and input a special markdown syntax into the comment which will property display as @<User> in the Todoist app. If you prefer to use the org link syntax and have it look funny in the Todoist app, set ~org-todoist-comment-tag-user-pretty~ to non-nil.
 

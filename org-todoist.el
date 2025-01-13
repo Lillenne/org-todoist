@@ -258,6 +258,11 @@ this directory must be accessible on all PCs")
               (org-todoist--encode-item ITEM))
     (json-encode ITEM)))
 
+(defun org-todoist--label-default-sections (AST)
+  (dolist (section (org-todoist--get-sections AST))
+    (when (string= (org-element-property :raw-value section) org-todoist--default-section-name)
+      (org-todoist--insert-id section org-todoist--default-id))))
+
 (defun org-todoist--do-sync (TOKEN OPEN)
   (when (or (null org-todoist-api-token) (not (stringp org-todoist-api-token)))
     (error "No org-todoist-api-token API token set"))
@@ -517,6 +522,7 @@ the wrong headline!"
 
 (defun org-todoist--push (ast old)
   (let ((commands nil))
+    (org-todoist--label-default-sections ast)
     (org-element-map ast 'headline
       (lambda (hl)
         ;; TODO would be easier as oop, need to learn lisp oop
@@ -700,31 +706,45 @@ the wrong headline!"
                                    ("args" . (("id" . ,id))))
                                  commands))))))
                   ((and (not section) (string= type org-todoist--section-type) (not (string= org-todoist--default-section-name title)))
-                   (cond ((not oldtask)
-                          ;; new section
-                          (org-todoist--insert-identifier hl org-todoist--section-type)
-                          (push `(("uuid" . ,(org-id-uuid))
-                                  ("temp_id" . ,id)
-                                  ("type" . "section_add")
-                                  ("args" . (("name" . ,title)
-                                             ("project_id" . ,proj))))
-                                commands))
-                         ;; TODO section archive and unarchive
-                         ((not (string= title oldtitle))
-                          ;; update section
-                          (push `(("uuid" . ,(org-id-uuid))
-                                  ("type" . "section_update")
-                                  ("args" . (("name" . ,title)
-                                             ("id" . ,id))))
-                                commands))
-                         ((and oldtask (not (cl-equalp proj oldproj)))
-                          ;; section_move
-                          (push `(("uuid" . ,(org-id-uuid))
-                                  ("type" . "section_move")
-                                  ("args" . (("id" . ,id)
-                                             ("project_id" . ,proj))))
-                                commands))
-                         ))
+                   (if (not oldtask)
+                       (progn
+                         ;; new section
+                         (org-todoist--insert-identifier hl org-todoist--section-type)
+                         (push `(("uuid" . ,(org-id-uuid))
+                                 ("temp_id" . ,id)
+                                 ("type" . "section_add")
+                                 ("args" . (("name" . ,title)
+                                            ("project_id" . ,proj))))
+                               commands))
+                     (cond
+                      ;; section archive
+                      ((and isarchived (not oldisarchived))
+                       (push `(("uuid" . ,(org-id-uuid))
+                               ("type" . "section_archive")
+                               ("args" . (("id" . ,id))))
+                             commands))
+
+                      ;; section unarchive
+                      ((and oldisarchived (not isarchived))
+                       (push `(("uuid" . ,(org-id-uuid))
+                               ("type" . "section_unarchive")
+                               ("args" . (("id" . ,id))))
+                             commands)))
+
+                     (unless (string= title oldtitle)
+                       ;; update section
+                       (push `(("uuid" . ,(org-id-uuid))
+                               ("type" . "section_update")
+                               ("args" . (("name" . ,title)
+                                          ("id" . ,id))))
+                             commands))
+                     (unless (cl-equalp proj oldproj)
+                       ;; section_move
+                       (push `(("uuid" . ,(org-id-uuid))
+                               ("type" . "section_move")
+                               ("args" . (("id" . ,id)
+                                          ("project_id" . ,proj))))
+                             commands))))
                   ((and (string= type org-todoist--project-type) (not (string= title "Inbox")))
                    (if (not oldtask)
                        ;; new project
@@ -925,7 +945,15 @@ the wrong headline!"
 
 (defun org-todoist--metadata-node (AST)
   "Gets or creates the main user headline in AST"
-  (org-todoist--category-node-query-or-create AST org-todoist-metadata-headline org-todoist--metadata-node-type))
+  (let* ((md (org-todoist--category-node-query-or-create AST org-todoist-metadata-headline org-todoist--metadata-node-type))
+         ;; (tags (org-element-property :tags md))
+         )
+    md
+    ;; (org-element-put-property md :tags
+    ;;                           (if tags
+    ;;                               (cl-pushnew org-archive-tag tags)
+    ;;                             `(,org-archive-tag)))
+    ))
 
 (defun org-todoist--update-users (COLLAB AST)
   "Adds or updates all users"
@@ -965,6 +993,7 @@ the wrong headline!"
                 nil
                 sect
                 org-todoist--section-skip-list))))
+  (org-todoist--label-default-sections AST)
   (dolist (proj (org-todoist--project-nodes AST))
     (org-todoist--sort-by-child-order proj "section_order" org-todoist--section-type)
     )) ;; TODO add default section here? Otherwise might not be added to new projects without manually added default section?
