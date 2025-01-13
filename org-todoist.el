@@ -24,7 +24,6 @@
 (require 's)
 (require 'org)
 (require 'org-capture)
-(require 'projectile)
 (require 'org-element)
 (require 'org-element-ast)
 (require 'ts)
@@ -129,9 +128,13 @@ this directory must be accessible on all PCs")
   (unless org-note-abort
     (let* ((headlines nil)
            (ast (org-todoist--file-ast))
-           (projects (org-todoist--project-nodes ast)) ;; TODO create projects via projectile?
+           (projects (org-todoist--project-nodes ast))
            (project-names (--map (org-element-property :raw-value it) projects))
-           (selected-project (if (string= (projectile-project-name) "-") (completing-read "Which project? " project-names) (projectile-project-name)))
+           (selected-project (if (require 'projectile nil 'no-error)
+                                 (if (string= (projectile-project-name) "-")
+                                     (completing-read "Which project? " project-names)
+                                   (projectile-project-name))
+                               (completing-read "Which project? " project-names)))
            (selected-project-element (--first (string= (org-element-property :raw-value it) selected-project) projects))
 
            (sections (when selected-project-element (org-todoist--get-sections selected-project-element)))
