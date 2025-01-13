@@ -101,7 +101,7 @@ Comments are done via ~org-add-note~ and currently ([2025-01-12 Sun]) do not sup
 
 [[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/assign.png]]
 ** Ignoring subtrees
-If you'd like to keep other notes or TODOs alongside your projects and not have them synced to Todoist, you can mark a subtree as ignored by setting the ~TODOIST_TYPE~ property to ~IGNORED~. Any org element descendent from an ignored node will not have its changes pushed to Todoist.
+If you'd like to keep other notes or TODOs alongside your projects and not have them synced to Todoist, you can mark a subtree as ignored by setting the ~TODOIST_TYPE~ property to ~IGNORED~ using M-x ~org-todoist-ignore-subtree~. Any org element descendent from an ignored node will not have its changes pushed to Todoist.
 
 ** Org capture to a Todoist project section
 /Captures will automatically sync by default/ via the ~org-capture-finalize-hook~. If you would like to change this behavior, run ~(remove-hook 'org-capture-after-finalize-hook #'org-todoist--sync-after-capture)~.
