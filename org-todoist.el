@@ -5,7 +5,7 @@
 ;; Author: Austin Kearns <59812315+Lillenne@users.noreply.github.com>
 ;; Maintainer: Austin Kearns <59812315+Lillenne@users.noreply.github.com>
 ;; Created: September 15, 2024
-;; Modified: September 15, 2024
+;; Modified: January 13, 2025
 ;; Version: 0.0.1
 ;; Keywords: calendar org todoist
 ;; Homepage: https://github.com/lillenne/org-todoist

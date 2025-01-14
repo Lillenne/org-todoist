@@ -7,19 +7,19 @@
 ** Project1
 :PROPERTIES:
 :TODOIST_TYPE: PROJECT
-:id: 1
+:tid: 1
 :END:
 *** Section 1
 :PROPERTIES:
 :TODOIST_TYPE: SECTION
-:id:       2
+:tid:       2
 :END:
 **** DONE Task complete :ARCHIVE:
 CLOSED: [2024-09-20 Fri 23:46]
 :PROPERTIES:
 :TODOIST_TYPE: TASK
 :child_order: 2
-:id:       8888
+:tid:       8888
 :END:
 Description
 
@@ -29,7 +29,7 @@ DEADLINE: <2025-01-01 Wed 00:01> SCHEDULED: <2024-12-31 Tue 23:59>
 :PROPERTIES:
 :TODOIST_TYPE: TASK
 :child_order: 1
-:id:       3
+:tid:       3
 :END:
 :LOGBOOK:
 - State "DONE"       from "TODO"       [2024-10-28 Mon 15:45]
@@ -43,14 +43,14 @@ More description
 :PROPERTIES:
 :TODOIST_TYPE: TASK
 :child_order: 1
-:id:       777
+:tid:       777
 :END:
 **** TODO Recurring task
 SCHEDULED: <2025-01-11 Sat ++1w>
 :PROPERTIES:
 :TODOIST_TYPE: TASK
 :child_order: 10
-:id:       3333333
+:tid:       3333333
 :LAST_REPEAT: [2025-01-02 Thu 23:10]
 :END:
 :LOGBOOK:
@@ -60,39 +60,39 @@ SCHEDULED: <2025-01-11 Sat ++1w>
 **** Unsectioned Task 1 [1/2]
 :PROPERTIES:
 :TODOIST_TYPE: TASK
-:id: 4
+:tid: 4
 :END:
 ***** DONE Task 8 :ARCHIVE:
 CLOSED: [2024-09-20 Fri 23:15]
 :PROPERTIES:
 :TODOIST_TYPE: TASK
-:id:       333
+:tid:       333
 :END:
 ***** TODO Task 9
 :PROPERTIES:
 :TODOIST_TYPE: TASK
-:id:       3334
+:tid:       3334
 :END:
 ** Project 2
 :PROPERTIES:
 :TODOIST_TYPE: PROJECT
-:id: 11
+:tid: 11
 :END:
 *** Section 2
 :PROPERTIES:
 :TODOIST_TYPE: SECTION
-:id: 12
+:tid: 12
 :END:
 **** [#D] Task 2
 :PROPERTIES:
 :TODOIST_TYPE: TASK
-:id: 13
+:tid: 13
 :END:
 *** Unsectioned
 **** Unsectioned Task 2
 :PROPERTIES:
 :TODOIST_TYPE: TASK
-:id: 14
+:tid: 14
 :END:
 * Collaborators
 :PROPERTIES:
@@ -102,5 +102,5 @@ CLOSED: [2024-09-20 Fri 23:15]
 :PROPERTIES:
 :TODOIST_TYPE: USER
 :full_name: Austin Kearns
-:id: 34
+:tid: 34
 :END:

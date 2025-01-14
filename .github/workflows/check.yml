@@ -1,0 +1,29 @@
+name: check
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emacs_version:
+          - 29.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs_version }}
+
+      - uses: leotaku/elisp-check@master
+        with:
+          file: org-todoist.el
+
+      - uses: leotaku/elisp-check@master
+        with:
+          check: ert
+          file: test.el
