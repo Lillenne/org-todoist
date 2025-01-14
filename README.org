@@ -164,6 +164,7 @@ Org Todoist requires a [[https://todoist.com/help/articles/find-your-api-token-J
 - ~org-todoist-done-keyword~ - Completed tasks are given this keyword.
 - ~org-todoist-deleted-keyword~ - Tasks with this keyword are deleted remotely.
 - ~org-todoist-storage-dir~ - Directory for storing Todoist sync_tokens and the previous org file for detecting changes to push.
+- ~org-todoist-my-id~ - (Currently unused) Your todoist ID. This will be inferred if your name is Todoist matches ~user-full-name~. Otherwise, you can set this property to the value of "tid" in the property drawer under "Todoist Metadata" > "Collaborators" > "<your-name>".
 
 ** Troubleshooting
 For troubleshooting errors, you can use the following variables and methods:
@@ -221,6 +222,7 @@ Things that I am not currently planning to implement (myself! you are welcome to
 - Markdown support
 - Activity log
 - View options
+- Templates (use org capture templates for this)
 
 * Disclaimer
 This package is not associated with, created by, or endorsed by [[https://doist.com/][Doist]] or [[https://orgmode.org/][Org]]

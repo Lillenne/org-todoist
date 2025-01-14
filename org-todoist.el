@@ -65,6 +65,12 @@ Currently this is ignored in favor of `current-time'.")
 (defvar org-todoist-infer-project-for-capture t
   "Whether to infer the active project in `org-capture'.")
 
+(defvar org-todoist-my-id nil "Your Todoist id.
+
+Set this if your todoist full_name differs from `user-full-name'.
+The correct value can be found in the `org-todoist-file' under
+Todoist Metadata > Collaborators > <your-name> as the property \"tid\". ")
+
 (defvar org-todoist-show-n-levels -1
   "The number of headline levels to show by default.
 If visiting the todoist buffer when sync is called, it will attempt to
@@ -351,9 +357,7 @@ the Todoist project, section, and optionally parent task."
                                         ;API Requests;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--select-user (TEXT)
   "Interactively select a user from the list of collaborators with prompt `TEXT'."
-  (if-let* ((ast (org-todoist--file-ast)) ;; TODO cache?
-            (userelements (org-element-map (org-todoist--user-node ast) 'headline
-                            (lambda (node) (when (org-todoist--node-type-query node org-todoist--collaborator-type) node))))
+  (if-let* ((userelements (org-todoist--all-users))
             (usernames (--map (org-element-property :raw-value it) userelements))
             (selected (completing-read TEXT usernames nil t))
             (selectedelement (--first (string= (org-element-property :raw-value it) selected) userelements)))
@@ -361,7 +365,7 @@ the Todoist project, section, and optionally parent task."
 
 (defun org-todoist--all-users ()
   "Get all headlines representing Todoist collaborators."
-  (org-element-map (org-todoist--user-node (org-todoist--file-ast)) 'headline #'identity))
+  (org-element-map (org-element-contents (org-todoist--user-node (org-todoist--file-ast))) 'headline #'identity))
 
 (defun org-todoist--encode (DATA)
   "Encode the Todoist sync API request alist `DATA'."
@@ -682,6 +686,13 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
 (defun org-todoist--is-ignored-type (NODE)
   "If the `NODE' has the `org-todoist--ignored-node-type'."
   (string= (org-todoist--get-todoist-type NODE t) org-todoist--ignored-node-type))
+
+(defun org-todoist--my-id ()
+  (unless org-todoist-my-id
+    (setq org-todoist-my-id (org-todoist--get-prop (--first (string-equal-ignore-case (user-full-name) (org-element-property :raw-value it))
+                                                            (org-todoist--all-users))
+                                                   "tid")))
+  org-todoist-my-id)
 
 (defun org-todoist--push (ast old)
   "Create commands for changes in the syntax tree from `OLD' to `AST'."
