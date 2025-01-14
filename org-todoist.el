@@ -136,7 +136,7 @@ this directory must be accessible on all PCs")
 
 (defconst org-todoist--sync-areas ["collaborators", "projects", "items", "sections"] "The types of Todoist items to sync.")
 
-(defconst org-todoist--project-skip-list '(name can_assign_tasks color is_deleted is_favorite is_frozen sync_id v2_id v2_parent_id view_style collapsed))
+(defconst org-todoist--project-skip-list '(name color is_deleted is_favorite is_frozen sync_id v2_id v2_parent_id view_style collapsed))
 
 (defconst org-todoist--section-skip-list '(name sync_id updated_at is_deleted v2_id v2_project_id archived_at collapsed))
 
@@ -1794,11 +1794,16 @@ to the `org-todoist--ignored-node-type'."
 (defun org-todoist-assign-task ()
   "Prompt for collaborator selection and assign the task at point to them."
   (interactive)
-  (let ((type (org-entry-get nil org-todoist--type)))
-    (if (and type (not (string= type org-todoist--task-type))) ; if there is no type, assume it is probably a new task.
-        (message "Can only assign users to task headlines")
-      (when-let ((selectedelement (org-todoist--select-user "Assign to: ")))
-        (org-set-property "responsible_uid" (org-todoist--get-prop selectedelement org-todoist--id-property))))))
+  (let ((can-assign (org-element-property :CAN_ASSIGN_TASKS
+                                          (car (org-element-resolve-deferred
+                                                (org-todoist--get-parent-of-type org-todoist--project-type (org-element-at-point)))))))
+    (if (and can-assign (not (equal "t" can-assign)))
+        (message "Current project does not support task assignment!")
+      (let ((type (org-entry-get nil org-todoist--type)))
+        (if (and type (not (string= type org-todoist--task-type))) ; if there is no type, assume it is probably a new task.
+            (message "Can only assign users to task headlines")
+          (when-let ((selectedelement (org-todoist--select-user "Assign to: ")))
+            (org-set-property "responsible_uid" (org-todoist--get-prop selectedelement org-todoist--id-property))))))))
 
 ;;;###autoload
 (defun org-todoist-sync (&optional ARG)
