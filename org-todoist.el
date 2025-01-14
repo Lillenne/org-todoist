@@ -147,13 +147,36 @@ this directory must be accessible on all PCs")
 (defconst org-todoist--sync-buffer-file "SYNC-BUFFER")
 
                                         ;Hooks;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; (defun org-todoist--item-close-hook ()
-;;   (when (and (equal org-state org-todoist-done-keyword)
-;;              (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point))))
-;;     ;; TODO send only item complete command. Remove item_update for recurring tasks?
-;;     ;; (org-todoist-sync nil)
-;;     ))
-;; (add-hook 'org-after-todo-state-change-hook 'org-todoist--item-close-hook) ;; TODO this requires it to be done from emacs and not eg. orgzly
+(defun org-todoist--item-close-hook ()
+  (when (and (equal org-state org-todoist-done-keyword)
+             (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point))))
+    (when-let* ((id (org-entry-get nil org-todoist--id-property))
+                ;; (cur-headline (org-entry-get nil "ITEM"))
+                (url-request-method org-todoist-http-method)
+                (url-request-extra-headers `(("Authorization" . ,(concat "Bearer " org-todoist-api-token))
+                                             ("Content-Type" . ,org-todoist-request-type)))
+                (args `(("id" . ,id)))
+                (request-data `(("sync_token" . ,(org-todoist--get-sync-token))
+                                ("commands" . ((("type" . "item_close")
+                                                ("uuid" . ,(org-id-uuid))
+                                                ("args" . ,args))))))
+                (url-request-data (org-todoist--encode request-data)))
+      (setq org-todoist--sync-err nil)
+      (when org-todoist-log-last-request
+        (setq org-todoist--last-request url-request-data))
+      (url-retrieve org-todoist-sync-endpoint
+                    (lambda (events)
+                      (let ((resp (progn (goto-char url-http-end-of-headers)
+                                         (decode-coding-region (point) (point-max) 'utf-8 t))))
+                        (when org-todoist-log-last-response
+                          (org-todoist--set-last-response resp)
+                          (setq org-todoist--last-response (json-read-from-string resp))))
+                      (setq org-todoist--sync-err events))
+                    nil
+                    'silent
+                    'inhibit-cookies))))
+
+(add-hook 'org-after-todo-state-change-hook 'org-todoist--item-close-hook) ;; TODO this requires it to be done from emacs and not eg. orgzly
 
 (add-to-list 'org-fold-show-context-detail '(todoist . lineage))
 
@@ -421,9 +444,7 @@ the Todoist project, section, and optionally parent task."
                   (lambda (events open ast old cur-headline show-n-levels)
                     (if open
                         (progn (org-todoist--do-sync-callback events open ast old cur-headline show-n-levels)
-                               (find-file (org-todoist-file))
-                               ;; (org-todoist--handle-display cur-headline show-n-levels)
-                               )
+                               (find-file (org-todoist-file)))
                       (save-current-buffer (org-todoist--do-sync-callback events open ast old cur-headline show-n-levels))))
                   `(,OPEN ,ast ,old ,cur-headline ,show-n-levels)
                   'silent
@@ -517,10 +538,10 @@ the Todoist project, section, and optionally parent task."
        (let ((hour (org-element-property :hour-start TIMESTAMP))
              (minute (org-element-property :minute-start TIMESTAMP)))
          (concat "T"
-                 (when (> 10 hour) "0") ;; pad to 2 char with 0
+                 (when (> 10 hour) "0") ; pad to 2 char with 0
                  (number-to-string hour)
                  ":"
-                 (when (> 10 minute) "0") ;; pad to 2 char with 0
+                 (when (> 10 minute) "0") ; pad to 2 char with 0
                  (number-to-string minute)
                  ":00.0"))))))
 
@@ -553,11 +574,20 @@ the Todoist project, section, and optionally parent task."
 (defun org-todoist--add-repeater (TIMESTAMP STRING)
   "Add a repeater value to `TIMESTAMP' from Todoist `STRING'."
   ;; TODO more repeater cases https://todoist.com/help/articles/introduction-to-recurring-due-dates-YUYVJJAV
-  (let ((match (s-match ".*\\([0-9]+\\) \\([week|day|month|hour]+\\)" STRING)))
-    (when match
+  (let ((match (s-match "[[:alpha:]]+\\s-*\\([[:digit:]]*\\)\\s-*\\([[:alpha:]]+\\)" STRING)))
+    (when (and match (member (nth 2 match) '("week" "weeks" "month" "months" "day" "days" "hour" "hours" "year" "years")))
       (org-element-put-property TIMESTAMP :repeater-type (if (s-contains? "!" STRING) 'restart 'cumulate))
-      (org-element-put-property TIMESTAMP :repeater-unit (intern (nth 2 match)))
-      (org-element-put-property TIMESTAMP :repeater-value (if (string= (cadr match) "") 1 (string-to-number (cadr match)))))))
+      (org-element-put-property TIMESTAMP :repeater-unit (org-todoist--get-repeater-symbol (nth 2 match)))
+      (org-element-put-property TIMESTAMP :repeater-value (if (s-blank? (cadr match)) 1 (string-to-number (cadr match)))))))
+
+(defun org-todoist--get-repeater-symbol (TIME-UNIT-STRING)
+  "Get the corrent org repeater-unit symbol from `TIME-UNIT-STRING'."
+  (cond
+   ((s-contains? "week" TIME-UNIT-STRING t) 'week)
+   ((s-contains? "day" TIME-UNIT-STRING t) 'day)
+   ((s-contains? "month" TIME-UNIT-STRING t) 'month)
+   ((s-contains? "year" TIME-UNIT-STRING t) 'year)
+   ((s-contains? "hour" TIME-UNIT-STRING t) 'hour)))
 
 (defun org-todoist--task-is-recurring (TASK)
   "If `TASK' is a recurring task."
@@ -688,6 +718,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
   (string= (org-todoist--get-todoist-type NODE t) org-todoist--ignored-node-type))
 
 (defun org-todoist--my-id ()
+  "Get the current user's Todoist uid."
   (unless org-todoist-my-id
     (setq org-todoist-my-id (org-todoist--get-prop (--first (string-equal-ignore-case (user-full-name) (org-element-property :raw-value it))
                                                             (org-todoist--all-users))
@@ -721,6 +752,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                (parenttask (org-todoist--get-task-id-position hl))
                (rid (org-element-property :RESPONSIBLE_UID hl))
                (is-recurring (org-todoist--task-is-recurring hl))
+               (is-todoist-recurring (org-todoist--get-prop hl "is_recurring"))
                (comments (org-todoist--get-comments-text hl))
                (lr (org-element-property :LAST_REPEAT hl))
                (last-repeat (when (and lr is-recurring) (org-timestamp-from-string lr)))
@@ -817,7 +849,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
 
 
                                ((not (string= proj oldproj))
-                                (unless (string= section oldsection) ;; whole section moved, ignore
+                                (unless (string= section oldsection) ; whole section moved, ignore
                                   ;;item_move - project
                                   (push `(("uuid" . ,(org-id-uuid))
                                           ("type" . "item_move")
@@ -833,7 +865,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                               (not (string-equal (org-element-property :raw-value dead) (org-element-property :raw-value olddead)))
                               (not (equal eff oldeff))
                               (not (equal pri oldpri))
-                              (not (equal labels oldlabels)) ;; TODO archive tag
+                              (not (equal labels oldlabels))
                               (not (equal rid oldrid))
                               )
                          ;; TODO HERE compare last repeat to old scheduled date. If same, we completed a recurring task and need to call item close
@@ -865,8 +897,8 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                                          ("type" . "item_delete")
                                          ("args" . (("id" . ,id))))
                                        commands)
-                               (if is-recurring
-                                   (push `(("uuid" . ,(org-id-uuid)) ;; TODO this doesn't work since org auto-reopens with new date. The task will instead be updated with item_update
+                               (if is-todoist-recurring
+                                   (push `(("uuid" . ,(org-id-uuid)) ; this doesn't work with org recurring tasks since org auto-reopens with new date. The task will instead be updated with item_update
                                            ("type" . "item_close")
                                            ("args" . (("id" . ,id))))
                                          commands)
@@ -1341,7 +1373,9 @@ inactive."
         (if planning
             (org-element-set existing planning)
           (org-element-extract existing))
-      (when planning (org-element-insert-before planning (org-todoist--get-property-drawer HEADLINE))))))
+      (when planning (org-element-insert-before planning (org-todoist--get-property-drawer HEADLINE))))
+    (when (eq t (assoc-default 'is_recurring (assoc-default 'due TASK)))
+      (org-todoist--add-prop HEADLINE "is_recurring" t))))
 
 (defun org-todoist--update-tasks (TASKS AST)
   "Update all tasks in `AST' using `TASKS' portion of API response."
