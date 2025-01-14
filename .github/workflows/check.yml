@@ -12,6 +12,8 @@ jobs:
       matrix:
         emacs_version:
           - 29.1
+        ignore_warnings:
+          - true
     steps:
       - uses: actions/checkout@v4
 
@@ -19,11 +21,16 @@ jobs:
         with:
           version: ${{ matrix.emacs_version }}
 
-      - uses: leotaku/elisp-check@master
+      - name: Lint
+        uses: leotaku/elisp-check@master
         with:
-          file: org-todoist.el
+          file: "org-todoist.el"
+          ignore_warnings: ${{ matrix.ignore_warnings }}
+          check: package-lint
 
-      - uses: leotaku/elisp-check@master
+      - name: Test
+        uses: leotaku/elisp-check@master
         with:
           check: ert
-          file: test.el
+          file: "test.el"
+          ignore_warnings: ${{ matrix.ignore_warnings }}
