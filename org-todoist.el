@@ -43,7 +43,7 @@
 
 (defvar org-todoist-api-token nil "The API token to use to sync with Todoist.")
 
-(defvar org-todoist-delete-remote-items t
+(defvar org-todoist-delete-remote-items nil
   "Delete remote items on Todoist when deleted from the `org-todoist-file'.
 WARNING items archived to sibling files will be detected as deleted!")
 
