@@ -1786,6 +1786,13 @@ Note, a \n character is appended if not present."
 ;; User functions
 
 ;;;###autoload
+(defun org-todoist-background-sync ()
+  "Sync with Todoist servers in the background."
+  (if (string= (buffer-file-name) (org-todoist-file))
+      (message "Skipping background sync with Todoist servers since buffer is active...")
+    (org-todoist-sync t)))
+
+;;;###autoload
 (defun org-todoist-unassign-task ()
   "Unassign the task at point by setting the \"responsible_uid\" property to nil."
   (interactive)

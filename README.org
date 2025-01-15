@@ -48,6 +48,11 @@ Syncing is done using the [[https://developer.todoist.com/sync/v9/#overview][Tod
 #+end_src
 
 *Local changes will overwrite remote changes!*
+
+To automatically sync at a given interval, unless the ~org-todoist-file~ is visited by the active buffer:
+#+begin_src emacs-lisp
+(run-at-time nil 180 #'org-todoist-background-sync)
+#+end_src
 ** Mapping org headlines to Todoist objects
 
 | Org                       | Todoist                     |
@@ -109,7 +114,7 @@ If you'd like to keep other notes or TODOs alongside your projects and not have 
 Sample capture templates:
 #+begin_src emacs-lisp
 (setq org-capture-templates `(
-        ;; Capture directly to the inbox
+        ;; Capture a TODO directly to the inbox
          ("i" "Inbox" entry
          (file+olp ,(org-todoist-file) "Inbox" ,org-todoist--default-section-name)
          "* TODO %?")
@@ -118,6 +123,8 @@ Sample capture templates:
          ;; Projects are determined by projectile if possible, otherwise via an interactive prompt
         ("p" "Select project, section, and parent task" entry (function org-todoist--find-project-and-section)
          "* TODO %^{What is the task} %^G %^{EFFORT}p %(org-todoist-assign-task) %(progn (org-schedule nil) nil) %(progn (org-deadline nil) nil)\n%?")
+        ;; Capture a note to an ignored subtree
+        ("n" "Project Notes" entry (function org-todoist-project-notes) "* %?")))
 #+end_src
 
 ** (Currently) unsupported features
