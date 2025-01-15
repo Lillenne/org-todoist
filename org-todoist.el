@@ -18,6 +18,14 @@
 ;; An Emacs package for bidirectional incremental sync of Org Mode elements with Todoist using org
 ;; exactly how you normally would in Emacs Org Mode.
 ;;
+;; Commands are automatically detected and batched by diffing the current `org-todoist-file' with the
+;; abstract syntax tree from a snapshot of the previous sync and nodes are updated in place using a single
+;; asynchronous request, meaning metadata (such as time tracking information and additional properties)
+;; is retained. Syncing is done using the Todoist sync API, which sends a single request for both pulling
+;; and pushing.
+;;
+;; Local changes will overwrite remote changes!
+;;
 ;;; Code:
 
 (require 'url)
@@ -98,7 +106,8 @@ so it looks nice in the Todoist app.")
   "The directory for org-todoist storage.
 
 If using multiple computers and a synced file solution,
-this directory must be accessible on all PCs")
+this directory must be accessible on all PCs running the sync command.")
+
 (defun org-todoist-file ()
   "Gets the full path of the `org-todoist-file'."
   (expand-file-name org-todoist-file org-directory))
@@ -145,6 +154,19 @@ this directory must be accessible on all PCs")
 (defconst org-todoist--sync-token-file "SYNC-TOKEN")
 
 (defconst org-todoist--sync-buffer-file "SYNC-BUFFER")
+
+                                        ;Debug data;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defvar org-todoist--sync-err nil "The error from the last sync, if any.")
+(defvar org-todoist-log-last-request t)
+(defvar org-todoist--last-request nil "The last request body, if any and org-todoist-log-last-request is non-nil.")
+(defvar org-todoist-log-last-response t)
+(defvar org-todoist--last-response nil "The last parsed response, if any and org-todoist-log-last-response is non-nil.")
+(defvar org-todoist-keep-old-sync-tokens nil)
+
+(defun org-todoist--set-last-response (JSON)
+  "Store the last Todoist response `JSON' to a file."
+  (with-temp-file (org-todoist--storage-file "PREVIOUS.json")
+    (insert JSON)))
 
                                         ;Hooks;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--item-close-hook ()
@@ -300,19 +322,7 @@ the Todoist project, section, and optionally parent task."
 
 (add-hook 'org-capture-after-finalize-hook #'org-todoist--sync-after-capture)
 
-                                        ;Debug data;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defvar org-todoist--sync-err nil "The error from the last sync, if any.")
-(defvar org-todoist-log-last-request t)
-(defvar org-todoist--last-request nil "The last request body, if any and org-todoist-log-last-request is non-nil.")
-(defvar org-todoist-log-last-response t)
-(defvar org-todoist--last-response nil "The last parsed response, if any and org-todoist-log-last-response is non-nil.")
-(defvar org-todoist-keep-old-sync-tokens nil)
-
-(defun org-todoist--set-last-response (JSON)
-  "Store the last Todoist response `JSON' to a file."
-  (with-temp-file (org-todoist--storage-file "PREVIOUS.json")
-    (insert JSON)))
-
+                                        ;Implementation;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--storage-file (FILE)
   "Determine full path of `FILE' relative to the `org-todoist-storage-dir'."
   (expand-file-name FILE org-todoist-storage-dir))
@@ -619,6 +629,7 @@ the Todoist project, section, and optionally parent task."
   HL)
 
 (defun org-todoist--first-direct-descendent-of-type (NODE TYPE)
+  "Get the first descendent from `NODE' of `TYPE'."
   (let ((ptype (org-element-type NODE)))
     (org-element-map (org-element-contents NODE) TYPE
       (lambda (node) (when (eq NODE (org-todoist--first-parent-of-type node ptype))
@@ -726,7 +737,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
   org-todoist-my-id)
 
 (defun org-todoist--push (ast old)
-  "Create commands for changes in the syntax tree from `OLD' to `AST'."
+  "Create commands necessary to transform syntax tree from `OLD' to `AST'."
   (let ((commands nil))
     (org-todoist--label-default-sections ast)
     (org-element-map ast 'headline
@@ -773,8 +784,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                (oldlabels (org-todoist--get-labels oldtags))
                (oldisarchived (member org-archive-tag oldtags))
                (oldrid (org-element-property :RESPONSIBLE_UID oldtask))
-               (oldcomments (org-todoist--get-comments-text oldtask))
-               )
+               (oldcomments (org-todoist--get-comments-text oldtask)))
           (unless (org-todoist--is-ignored hl)
 
             ;; new object. Create temp id
@@ -819,7 +829,6 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                        (unless (and (string= section oldsection)
                                     (string= proj oldproj)
                                     (string= parenttask oldparenttask))
-                         ;; TODO subtasks need to only follow their parent tasks, ignore section / project changes
                          (cond ((and parenttask (not (string= parenttask oldparenttask)))
                                 ;; item_move - parent task
                                 (push `(("uuid" . ,(org-id-uuid))
@@ -847,7 +856,6 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                                                    ("section_id" . ,section))))
                                       commands))
 
-
                                ((not (string= proj oldproj))
                                 (unless (string= section oldsection) ; whole section moved, ignore
                                   ;;item_move - project
@@ -866,8 +874,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                               (not (equal eff oldeff))
                               (not (equal pri oldpri))
                               (not (equal labels oldlabels))
-                              (not (equal rid oldrid))
-                              )
+                              (not (equal rid oldrid)))
                          ;; TODO HERE compare last repeat to old scheduled date. If same, we completed a recurring task and need to call item close
                          ;; Doesn't work - last repeat logs when it was closed not the due date. Functionally the same except it doesn't log the completion on the todoist side, I think
                          ;; (when (org-todoist--timestamp-times-equal last-repeat oldsch) ;; completed recurring task
@@ -889,7 +896,6 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                            (push req commands)))
 
                        ;; todo-state changed
-                       ;; TODO recurring task support
                        (when (not (equal todo-type old-todo-type))
                          (if (eq 'done todo-type)
                              (if (string= org-todoist-deleted-keyword todo-kw)
@@ -1166,15 +1172,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
 
 (defun org-todoist--metadata-node (AST)
   "Get or create the main metadata headline in `AST'."
-  (let* ((md (org-todoist--category-node-query-or-create AST org-todoist-metadata-headline org-todoist--metadata-node-type))
-         ;; (tags (org-element-property :tags md))
-         )
-    md
-    ;; (org-element-put-property md :tags
-    ;;                           (if tags
-    ;;                               (cl-pushnew org-archive-tag tags)
-    ;;                             `(,org-archive-tag)))
-    ))
+  (org-todoist--category-node-query-or-create AST org-todoist-metadata-headline org-todoist--metadata-node-type))
 
 (defun org-todoist--update-users (COLLAB AST)
   "Update all users in `AST' from API response collaborator section, `COLLAB'."
@@ -1216,8 +1214,8 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                 org-todoist--section-skip-list))))
   (org-todoist--label-default-sections AST)
   (dolist (proj (org-todoist--project-nodes AST))
-    (org-todoist--sort-by-child-order proj "section_order" org-todoist--section-type)
-    )) ;; TODO add default section here? Otherwise might not be added to new projects without manually added default section?
+    ;; TODO add default section here? Otherwise might not be added to new projects without manually added default section?
+    (org-todoist--sort-by-child-order proj "section_order" org-todoist--section-type)))
 
 (defun org-todoist--project-nodes (AST)
   "Get all project nodes within the `org-todoist-file' syntax tree, `AST'."
@@ -1344,7 +1342,7 @@ inactive."
                                      (if INACTIVE "]" ">"))))
 
 (defun org-todoist--timestamp-to-utc-str (TIMESTAMP)
-  "Converts org `TIMESTAMP' element to a UTC RFC3339 string"
+  "Convert org `TIMESTAMP' element to a UTC RFC3339 string."
   (ts-format "%Y-%m-%dT%H:%M:%S.0Z"
              (ts-adjust 'second (- (car (current-time-zone))) (ts-parse-org-element TIMESTAMP))))
 
@@ -1406,9 +1404,11 @@ inactive."
                (org-todoist--schedule task data)
                (org-todoist--set-effort task data)
                (org-todoist--set-priority task (assoc-default 'priority data))
-               (org-todoist--set-todo task (assoc-default 'checked data) (assoc-default 'is_deleted data))))) ;; TODO checked vs is_archived?
+               ;; TODO checked vs is_archived?
+               (org-todoist--set-todo task (assoc-default 'checked data) (assoc-default 'is_deleted data)))))
+
   ;; second loop to set parent tasks after all have been created
-  (let ((with-child nil)) ;; Only sort child tasks on the first go around. If you move it, you probably moved it for a reason?
+  (let ((with-child nil)) ; Only sort child tasks on the first go around. If you move it, you probably moved it for a reason?
     (cl-loop for data across TASKS do
              (when-let* ((parenttaskid (assoc-default 'parent_id data))
                          (task (org-todoist--get-by-id org-todoist--task-type (assoc-default 'id data) AST))
@@ -1454,17 +1454,17 @@ appropriate symbol representation."
 
 (defun org-todoist--sort-by-child-order (NODE PROPERTY &optional TYPE)
   "WIP Sort children of `TYPE' under `NODE' by numeric `PROPERTY'."
-  nil
-  ;; (let* ((children (org-element-map NODE 'headline
-  ;;                    (lambda (hl) (when (and (eq (org-todoist--first-parent-of-type hl 'headline) NODE)
-  ;;                                            (org-todoist--get-prop hl PROPERTY) ;; only move children with the property
-  ;;                                            (or (not TYPE)
-  ;;                                                (string= (org-todoist--get-todoist-type hl) TYPE)))
-  ;;                                   hl))))
-  ;;        (sorted (cl-sort children (lambda (a b) (< (org-todoist--get-position a PROPERTY) (org-todoist--get-position b PROPERTY))))))
-  ;;   (dolist (child sorted)
-  ;;     (org-element-adopt NODE (org-element-extract child))))
-  )
+  nil)
+;; (let* ((children (org-element-map NODE 'headline
+;;                    (lambda (hl) (when (and (eq (org-todoist--first-parent-of-type hl 'headline) NODE)
+;;                                            (org-todoist--get-prop hl PROPERTY) ;; only move children with the property
+;;                                            (or (not TYPE)
+;;                                                (string= (org-todoist--get-todoist-type hl) TYPE)))
+;;                                   hl))))
+;;        (sorted (cl-sort children (lambda (a b) (< (org-todoist--get-position a PROPERTY) (org-todoist--get-position b PROPERTY))))))
+;;   (dolist (child sorted)
+;;     (org-element-adopt NODE (org-element-extract child))))
+;; )
 
 (defun org-todoist--set-effort (NODE TASK)
   "Set the EFFORT property of `NODE' using the API response data `TASK'."
@@ -1502,7 +1502,7 @@ appropriate symbol representation."
 (defun org-todoist--set-todo (NODE CHECKED &optional DELETED)
   "Set the TODO state of `NODE' from the `CHECKED' and `DELETED' properties.
 `CHECKED' and `DELETED' are from the Todoist API response."
-  (if (or (eql t CHECKED) ;; :json-false for false currently, t for true
+  (if (or (eql t CHECKED) ; :json-false for false currently, t for true
           (eql t DELETED))
       (progn
         (org-element-put-property NODE :todo-keyword (if (eql t DELETED) org-todoist-deleted-keyword org-todoist-done-keyword))
@@ -1523,7 +1523,7 @@ appropriate symbol representation."
 ;;     (org-todoist--add-tag NODE (concat  "@" (string-replace " " "_" name)))))
 
 (defun org-todoist--add-tag (NODE TAG)
-  "Adds a `TAG' to a `NODE'."
+  "Add `TAG' to `NODE'."
   (let ((tags (org-element-property :tags NODE)))
     (if (null tags)
         (org-element-put-property NODE :tags `(,TAG))
@@ -1571,7 +1571,7 @@ If created, use `DEFAULT' text."
   (when (equal (org-todoist--get-prop NODE org-todoist--type) TYPE) NODE))
 
 (defun org-todoist--update-file (AST)
-  "Replaces the org-todoist file with the org representation `AST'."
+  "Replace the org-todoist file with the org representation `AST'."
   (with-current-buffer
       (org-todoist--get-todoist-buffer)
     (erase-buffer)
@@ -1707,14 +1707,14 @@ Replaces the current value with `VALUE' if property `KEY' already exists."
   (let ((key (org-todoist--get-key KEY))
         (value (org-todoist--get-value VALUE))
         (type (org-element-type DRAWER)))
-    (cond ((eq type 'property-drawer) ;; Add directly
+    (cond ((eq type 'property-drawer) ; Add directly
            (org-todoist--set-prop-in-place DRAWER key value)
            DRAWER)
-          ((eq type 'headline) ;; Find drawer and update both drawer and property plist
+          ((eq type 'headline) ; Find drawer and update both drawer and property plist
            (let* ((headline DRAWER)
                   (drawer (org-todoist--get-property-drawer headline)))
              ;; (org-todoist--put-node-attribute headline (org-todoist--to-symbol KEY) VALUE) ;; update property plist
-             (unless drawer ;; create drawer if needed
+             (unless drawer ; create drawer if needed
                (setq drawer (org-element-create 'property-drawer))
                (org-todoist--adopt-drawer headline drawer))
              (org-todoist--set-prop-in-place drawer key value)
