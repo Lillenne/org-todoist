@@ -122,7 +122,7 @@
                       (let* ((ast (org-element-parse-buffer))
                              (task (org-todoist--get-by-id org-todoist--task-type "3" ast))
                              (tags (org-element-property :tags task)))
-                        (should (-contains-p tags "ARCHIVE"))))))
+                        (should (-contains-p tags org-archive-tag))))))
 
 ;; TODO fix
 ;; (ert-deftest org-todoist--test--get-or-create-node ()
@@ -145,9 +145,12 @@ More description
 " (org-todoist--description-text (org-todoist--test-task)))))
 
 (ert-deftest org-todoist--test-update-file ()
-  "Tests insertion of org syntax from abstract syntax tree into org-todoist-file"
-  (org-todoist--update-file (org-todoist--generate-ast test-org-str))
-  (with-file-contents! (org-todoist-file) (should (equal (org-todoist--remove-ws test-org-str) (org-todoist--remove-ws (buffer-string))))))
+  (let ((org-todoist-file (make-temp-file "todoist")))
+    "Tests insertion of org syntax from abstract syntax tree into org-todoist-file"
+    (org-todoist--update-file (org-todoist--generate-ast test-org-str))
+    (with-temp-buffer
+      (insert-file-contents (org-todoist-file))
+      (should (equal (org-todoist--remove-ws test-org-str) (org-todoist--remove-ws (buffer-string)))))))
 
 (ert-deftest org-todoist--test--get-parent ()
   "Tests getting the parent node of a specific type"
@@ -158,12 +161,12 @@ More description
 
 (ert-deftest org-todoist--test--insert-identifier ()
   "Tests adding the org-todoist--type property to a property drawer, creating it if necessary"
-  (let* ((astwithout (org-todoist--generate-ast "* Headline\n"))
-         (astwith (org-todoist--generate-ast "* Headline
+  (let* ((astwithout (org-element-map (org-todoist--generate-ast "* Headline\n") 'headline #'identity nil t))
+         (astwith (org-element-map (org-todoist--generate-ast "* Headline
 :PROPERTIES:
 :MYPROP:  VALUE
 :END:
-")))
+") 'headline #'identity nil t)))
     (org-todoist--insert-identifier astwith "TASK")
     (org-todoist--insert-identifier astwithout "TASK")
     (should (org-todoist--element-equals-str  "* Headline
@@ -188,7 +191,7 @@ More description
 ;;       (should (equal result '(t nil))))))
 
 (ert-deftest org-todoist--test--get-property-drawer--exists-gets ()
-  (let ((drawer (org-todoist--get-property-drawer (org-todoist--generate-ast test-org-str))))
+  (let ((drawer (org-todoist--get-property-drawer (org-element-map (org-todoist--generate-ast test-org-str) 'headline #'identity nil t))))
     (should (org-element-type-p drawer 'property-drawer))))
 
 ;; (ert-deftest org-todoist--test--put-node-attribute ()
@@ -207,7 +210,7 @@ More description
   "Retrieves the property KEY from the property drawer directly under node.
 Returns nil if not present"
   (should-not (org-todoist--get-prop (org-todoist--generate-ast "* Headline") "MYPROP"))
-  (should (string-equal-ignore-case "test" (org-todoist--get-prop (org-todoist--generate-ast test-org-str) "MYPROP"))))
+  (should (string-equal-ignore-case "test" (org-todoist--get-prop (org-element-map (org-todoist--generate-ast test-org-str) 'headline #'identity nil t) "MYPROP"))))
 
 (ert-deftest org-todoist--test--add-prop--does-not-exist-works ()
   "Tests if adding a property works both when a property already exists."
@@ -317,9 +320,7 @@ Returns nil if not present"
   (org-todoist--invoke-with-buffer contents #'org-element-parse-buffer))
 
 (defun org-todoist--generate-sample-ast ()
-  (org-todoist--generate-ast (file-to-string "/home/aus/projects/org-todoist/sample.org")))
-
-(defun org-todoist--sample-response () (with-file-contents! "/home/aus/projects/org-todoist/api-call.json" (json-read)))
+  (org-todoist--generate-ast (file-to-string (expand-file-name "sample.org"))))
 
 (defun org-todoist--test-task () (org-todoist--get-by-id org-todoist--task-type "3" (org-todoist--generate-sample-ast)))
 (defun org-todoist--test-subtask () (org-todoist--get-by-id org-todoist--task-type "777" (org-todoist--generate-sample-ast)))

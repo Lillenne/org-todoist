@@ -25,7 +25,7 @@ jobs:
         uses: leotaku/elisp-check@master
         with:
           file: "org-todoist.el"
-          ignore_warnings: ${{ matrix.ignore_warnings }}
+          ignore_warnings: false
           check: package-lint
 
       - name: Test
