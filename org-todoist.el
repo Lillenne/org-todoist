@@ -9,14 +9,14 @@
 ;; Version: 0.0.1
 ;; Keywords: calendar org todoist
 ;; Homepage: https://github.com/lillenne/org-todoist
-;; Package-Requires: ((emacs "29.1") (s "1.13.1") (org "9.7.19") (ts "0.3") (dash "2.19.1"))
+;; Package-Requires: ((emacs "29.1") (s "1.13") (org "9.7.19") (ts "0.3") (dash "2.19.1"))
 ;;
 ;; This file is not part of GNU Emacs.
 ;;
 ;;; Commentary:
 ;;
-;; An Emacs package for bidirectional incremental sync of Org Mode elements with Todoist using org
-;; exactly how you normally would in Emacs Org Mode.
+;; An Emacs package for bidirectional incremental sync of org-mode elements with Todoist using org
+;; exactly how you normally would in Emacs org-mode.
 ;;
 ;; Commands are automatically detected and batched by diffing the current `org-todoist-file' with the
 ;; abstract syntax tree from a snapshot of the previous sync and nodes are updated in place using a single
@@ -52,7 +52,7 @@
 (defvar org-todoist-api-token nil "The API token to use to sync with Todoist.")
 
 (defvar org-todoist-delete-remote-items nil
-  "Delete remote items on Todoist when deleted from the `org-todoist-file'.
+  "Delete items on Todoist when deleted from the variable `org-todoist-file'.
 WARNING items archived to sibling files will be detected as deleted!")
 
 (defvar org-todoist-file "todoist.org" "The name of the todoist org file.
@@ -66,18 +66,18 @@ If relative, it is taken as relative to the org directory.")
   "The timezone to use when converting from Todoist time (UTC).
 Currently this is ignored in favor of `current-time'.")
 
-(defvar org-todoist-lang "en")
+(defvar org-todoist-lang "en" "The language for Todoist time strings.")
 
-(defvar org-todoist-use-auto-reminder t)
+(defvar org-todoist-use-auto-reminder t "Whether new tasks should use your Todoist's default reminder.")
 
 (defvar org-todoist-infer-project-for-capture t
   "Whether to infer the active project in `org-capture'.")
 
 (defvar org-todoist-my-id nil "Your Todoist id.
 
-Set this if your todoist full_name differs from `user-full-name'.
-The correct value can be found in the `org-todoist-file' under
-Todoist Metadata > Collaborators > <your-name> as the property \"tid\". ")
+Set this if your todoist full_name differs from symbol `user-full-name'.
+The correct value can be found in the variable `org-todoist-file' under
+Todoist Metadata > Collaborators > <your-name> as the property \"tid\".")
 
 (defvar org-todoist-show-n-levels -1
   "The number of headline levels to show by default.
@@ -109,7 +109,7 @@ If using multiple computers and a synced file solution,
 this directory must be accessible on all PCs running the sync command.")
 
 (defun org-todoist-file ()
-  "Gets the full path of the `org-todoist-file'."
+  "Gets the full path of the variable `org-todoist-file'."
   (expand-file-name org-todoist-file org-directory))
 
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -123,23 +123,23 @@ this directory must be accessible on all PCs running the sync command.")
 
 (defconst org-todoist--type "TODOIST_TYPE" "The org property name for Todoist object type metadata.")
 
-(defconst org-todoist--collaborator-type "USER" "The org-todoist--type value for collaborator objects.")
+(defconst org-todoist--collaborator-type "USER" "The `org-todoist--type' value for collaborator objects.")
 
-(defconst org-todoist--section-type "SECTION" "The org-todoist--type value for section objects.")
+(defconst org-todoist--section-type "SECTION" "The `org-todoist--type' value for section objects.")
 
-(defconst org-todoist--project-type "PROJECT" "The org-todoist--type value for project objects.")
+(defconst org-todoist--project-type "PROJECT" "The `org-todoist--type' value for project objects.")
 
-(defconst org-todoist--default-id "default" "The org-todoist--type value for the default section.")
+(defconst org-todoist--default-id "default" "The `org-todoist--type' value for the default section.")
 
-(defconst org-todoist--id-property "tid" "The org-todoist--type value for the default section.")
+(defconst org-todoist--id-property "tid" "The `org-todoist--type' value for the default section.")
 
-(defconst org-todoist--task-type "TASK" "The org-todoist--type value for task objects.")
+(defconst org-todoist--task-type "TASK" "The `org-todoist--type' value for task objects.")
 
-(defconst org-todoist--user-node-type "USER_HEADLINE" "The org-todoist--type value for the collaborator metadata node.")
+(defconst org-todoist--user-node-type "USER_HEADLINE" "The `org-todoist--type' value for the collaborator metadata node.")
 
-(defconst org-todoist--metadata-node-type "METADATA" "The org-todoist--type value for the root metadata node.")
+(defconst org-todoist--metadata-node-type "METADATA" "The `org-todoist--type' value for the root metadata node.")
 
-(defconst org-todoist--ignored-node-type "IGNORE" "The org-todoist--type value for the root metadata node.")
+(defconst org-todoist--ignored-node-type "IGNORE" "The `org-todoist--type' value for the root metadata node.")
 
 (defconst org-todoist--default-section-name "Default Section")
 
@@ -158,9 +158,9 @@ this directory must be accessible on all PCs running the sync command.")
                                         ;Debug data;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defvar org-todoist--sync-err nil "The error from the last sync, if any.")
 (defvar org-todoist-log-last-request t)
-(defvar org-todoist--last-request nil "The last request body, if any and org-todoist-log-last-request is non-nil.")
+(defvar org-todoist--last-request nil "The last request body, if any and `org-todoist-log-last-request' is non-nil.")
 (defvar org-todoist-log-last-response t)
-(defvar org-todoist--last-response nil "The last parsed response, if any and org-todoist-log-last-response is non-nil.")
+(defvar org-todoist--last-response nil "The last parsed response, if any and `org-todoist-log-last-response' is non-nil.")
 (defvar org-todoist-keep-old-sync-tokens nil)
 
 (defun org-todoist--set-last-response (JSON)
@@ -170,6 +170,7 @@ this directory must be accessible on all PCs running the sync command.")
 
                                         ;Hooks;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--item-close-hook ()
+  "Send an item_close request for TODO at point."
   (when (and (equal org-state org-todoist-done-keyword)
              (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point))))
     (when-let* ((id (org-entry-get nil org-todoist--id-property))
@@ -204,7 +205,7 @@ this directory must be accessible on all PCs running the sync command.")
 
                                         ;Org-capture integration;;;;;;;;;;;;;;;
 (defun org-todoist--sync-after-capture ()
-  "Syncs with todoist after any captures to the `org-todoist-file'."
+  "Syncs with todoist after any captures to the variable `org-todoist-file'."
   (unless org-note-abort
     (save-excursion
       (save-window-excursion
@@ -283,7 +284,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE."
 
 ;;;###autoload
 (defun org-todoist-find-project-and-section ()
-  "Find or create headlines for an `org-capture' to the `org-todoist-file'.
+  "Find or create headlines for an `org-capture'.
 Prompts for or auto-determines \(see `org-todoist-infer-project-for-capture')
 the Todoist project, section, and optionally parent task."
   (unless org-note-abort
@@ -490,7 +491,7 @@ the Todoist project, section, and optionally parent task."
       (find-file-noselect file))))
 
 (defun org-todoist--handle-display (cur-headline show-n-levels)
-  "Handle saving and folding of the `org-todoist-file' buffer.
+  "Handle saving and folding of the Todoist buffer.
 
 `CUR-HEADLINE' is the headline at point prior to the sync call.
 `SHOW-N-LEVELS' is the number of outline levels to show."
@@ -1083,7 +1084,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
              )))
 
 (defun org-todoist--insert-header ()
-  "Insert header for `org-todoist-file'."
+  "Insert a header appropriate for the Todoist org file."
   ;; TODO use element api
   (goto-char (point-min))
   (insert "#+title: Todoist
@@ -1218,12 +1219,12 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
     (org-todoist--sort-by-child-order proj "section_order" org-todoist--section-type)))
 
 (defun org-todoist--project-nodes (AST)
-  "Get all project nodes within the `org-todoist-file' syntax tree, `AST'."
+  "Get all Todoist project nodes within the syntax tree, `AST'."
   (org-element-map AST 'headline
     (lambda (hl) (when (string-equal (org-todoist--get-todoist-type hl) org-todoist--project-type) hl))))
 
 (defun org-todoist--section-nodes (AST)
-  "Get all section nodes within the `org-todoist-file' syntax tree, `AST'."
+  "Get all Todoist section nodes within the syntax tree, `AST'."
   (org-element-map AST 'headline
     (lambda (hl) (when (string-equal (org-todoist--get-todoist-type hl) org-todoist--section-type) hl))))
 
@@ -1631,7 +1632,7 @@ If `FIRST', only get the first matching parent."
     'headline nil FIRST))
 
 (defun org-todoist--get-parent-of-element-type (TYPE NODE)
-  "Gets the parent(s) of `NODE' with org-element-type `TYPE'."
+  "Gets the parent(s) of `NODE' with `org-element-type' `TYPE'."
   (org-element-lineage-map NODE
       (lambda (parent) (when (and (not (eq NODE parent))) (eq (org-element-type NODE) TYPE)
                              parent))
@@ -1848,19 +1849,20 @@ to the `org-todoist--ignored-node-type'."
 
 ;;;###autoload
 (defun org-todoist-sync (&optional ARG)
-  "Perform a bidirectional incremental sync of the `org-todoist-file' with Todoist.
+  "Perform a bidirectional incremental sync with Todoist.
 
 The commands to apply will be determined by diffing the copy of the
-`org-todoist-file'saved during the last sync with the current version
-of the file. Commands are processed prior to fetching, thus local
-changes will overwrite remote changes.
+Todoist file (see function `org-todoist-file') that was saved
+during the last sync with the current version of the file.
+Commands are processed prior to fetching, thus local changes
+will overwrite remote changes.
 
-With `ARG', do not open the `org-todoist-file' buffer after sync."
+With `ARG', do not open the Todoist buffer after sync."
   (interactive "P")
   (org-todoist--do-sync (org-todoist--get-sync-token) (null ARG)))
 
 (defun org-todoist--reset (&optional ARG)
-  "Delete the `org-todoist-file' and perform a full sync from Todoist.
+  "Delete the Todoist file and perform a full sync from Todoist.
 
 NOTE this will irreversibly discard all data not stored in Todoist
 \(e.g., time tracking information and ignored subtrees.\).
@@ -1868,7 +1870,7 @@ NOTE this will irreversibly discard all data not stored in Todoist
 This function is often used in development, but end users will likely
 have no need for it.
 
-With `ARG', do not open the `org-todoist-file' buffer after sync."
+With `ARG', do not open the Todoist buffer after sync."
   (interactive "P")
   (when (get-buffer org-todoist-file)
     (kill-buffer org-todoist-file))
