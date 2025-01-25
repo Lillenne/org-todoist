@@ -1238,7 +1238,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
 
 (defun org-todoist--get-headline-level (NODE)
   "Get the nearest headline level of `NODE'."
-  (if-let (hl (org-element-lineage-map NODE (lambda (n) (when (org-element-type n 'headline) (org-element-property :level n))) nil t t))
+  (if-let (hl (org-element-lineage-map NODE (lambda (n) (when (eq (org-element-type n) 'headline) (org-element-property :level n))) nil t t))
       hl
     0))
 
