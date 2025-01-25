@@ -5,7 +5,7 @@
 ;; Author: Austin Kearns <59812315+Lillenne@users.noreply.github.com>
 ;; Maintainer: Austin Kearns <59812315+Lillenne@users.noreply.github.com>
 ;; Created: September 15, 2024
-;; Modified: January 13, 2025
+;; Modified: January 25, 2025
 ;; Version: 0.0.1
 ;; Keywords: calendar org todoist
 ;; Homepage: https://github.com/lillenne/org-todoist
@@ -13,16 +13,19 @@
 ;;
 ;; This file is not part of GNU Emacs.
 ;;
+;;; SPDX-License-Identifier: GPL-3.0-or-later
+;;
 ;;; Commentary:
 ;;
-;; An Emacs package for bidirectional incremental sync of org-mode elements with Todoist using org
-;; exactly how you normally would in Emacs org-mode.
+;; An Emacs package for bidirectional incremental sync of org-mode elements
+;; with Todoist using org exactly how you normally would in Emacs org-mode.
 ;;
-;; Commands are automatically detected and batched by diffing the current `org-todoist-file' with the
-;; abstract syntax tree from a snapshot of the previous sync and nodes are updated in place using a single
-;; asynchronous request, meaning metadata (such as time tracking information and additional properties)
-;; is retained. Syncing is done using the Todoist sync API, which sends a single request for both pulling
-;; and pushing.
+;; Commands are automatically detected and batched by diffing the current
+;; `org-todoist-file' with the abstract syntax tree from a snapshot of the
+;; previous sync and nodes are updated in place using a single asynchronous
+;; request, meaning metadata (such as time tracking information and
+;; additional properties) is retained. Syncing is done using the Todoist
+;; sync API, which sends a single request for both pulling and pushing.
 ;;
 ;; Local changes will overwrite remote changes!
 ;;
@@ -209,7 +212,8 @@ this directory must be accessible on all PCs running the sync command.")
                     'silent
                     'inhibit-cookies))))
 
-(add-hook 'org-after-todo-state-change-hook 'org-todoist--item-close-hook) ;; TODO this requires it to be done from emacs and not eg. orgzly
+;; NOTE this requires it to be done from emacs and not eg. orgzly
+(add-hook 'org-after-todo-state-change-hook #'org-todoist--item-close-hook)
 
 (add-to-list 'org-fold-show-context-detail '(todoist . lineage))
 
@@ -610,7 +614,7 @@ the Todoist project, section, and optionally parent task."
 
 (defun org-todoist--task-is-recurring (TASK)
   "If `TASK' is a recurring task."
-  (not (null (org-element-property :repeater-type (org-element-property :scheduled TASK)))))
+  (org-element-property :repeater-type (org-element-property :scheduled TASK)))
 
 (defun org-todoist--log-drawer (HL)
   "Gets the LOGBOOK drawer for `HL'."
@@ -1319,7 +1323,7 @@ from PARENT."
   "Get a timestamp object representing `DATE' in the `current-time-zone'.
 
 When `INACTIVE', return an inactive timestamp."
-  (unless (null date)
+  (when date
     (let ((hastime (not (eql 10 (length date))))) ;; Todoist date format for tasks without a time is 10 char string
       (if (not (string= (substring date (- (length date) 1)) "Z"))
           (org-timestamp-from-time (org-read-date nil t date nil) hastime inactive)
@@ -1837,8 +1841,8 @@ to the `org-todoist--ignored-node-type'."
   (interactive)
   (when-let ((selectedelement (org-todoist--select-user "Tag: ")))
     (if org-todoist-comment-tag-user-pretty
-        (insert (concat "[[" (org-element-property :raw-value selectedelement) "][todoist-mention://" (org-todoist--id-or-temp-id selectedelement) "]"))
-      (insert (concat "[" (org-element-property :raw-value selectedelement) "](todoist-mention://" (org-todoist--id-or-temp-id selectedelement) ")")))))
+        (insert "[[" (org-element-property :raw-value selectedelement) "][todoist-mention://" (org-todoist--id-or-temp-id selectedelement) "]")
+      (insert "[" (org-element-property :raw-value selectedelement) "](todoist-mention://" (org-todoist--id-or-temp-id selectedelement) ")"))))
 
 ;;;###autoload
 (defun org-todoist-assign-task ()
