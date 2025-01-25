@@ -40,14 +40,23 @@
 (require 'outline)
 (require 'xdg)
 
-                                        ;Required setup;;;;;;;;;;;;;;;;;;;;;;;;
-;; TODO likely don't want to override user configuration. Todoist has 4 priorities.
-(setq org-priority-highest ?A
-      org-priority-default ?D
-      org-priority-lowest ?D)
-
                                         ;Configuration Variables;;;;;;;;;;;;;;;
-;; (defvar url-http-end-of-headers nil) ;; defined in url, but emacs provides warning about free var when using
+(defvar url-http-end-of-headers) ;; defined in url, but emacs provides warning about free var when using
+
+(defvar org-todoist-p1 ?A "The priority to map to Todoist P1.
+This value must fall between `org-priority-lowest' and `org-priority-highest'.")
+
+(defvar org-todoist-p2 ?B "The priority to map to Todoist P2.
+This value must fall between `org-priority-lowest' and `org-priority-highest'.")
+
+(defvar org-todoist-p3 ?C "The priority to map to Todoist P3.
+This value must fall between `org-priority-lowest' and `org-priority-highest'.")
+
+(defvar org-todoist-p4 ?D "The priority to map to Todoist P4.
+This value must fall between `org-priority-lowest' and `org-priority-highest'.")
+
+(defvar org-todoist-priority-default ?D "The default priority for Todoist tasks.
+This value must fall between `org-priority-lowest' and `org-priority-highest'.")
 
 (defvar org-todoist-api-token nil "The API token to use to sync with Todoist.")
 
@@ -171,6 +180,7 @@ this directory must be accessible on all PCs running the sync command.")
                                         ;Hooks;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--item-close-hook ()
   "Send an item_close request for TODO at point."
+  (defvar org-state) ; silence byte compilation warning for org-state, which will already be defined here
   (when (and (equal org-state org-todoist-done-keyword)
              (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point))))
     (when-let* ((id (org-entry-get nil org-todoist--id-property))
@@ -452,22 +462,20 @@ the Todoist project, section, and optionally parent task."
       (setq org-todoist--last-request url-request-data))
     (message (if OPEN "Syncing with todoist. Buffer will open when sync is complete..." "Syncing with todoist. This may take a moment..."))
     (url-retrieve org-todoist-sync-endpoint
-                  (lambda (events open ast old cur-headline show-n-levels)
+                  (lambda (events open ast cur-headline show-n-levels)
                     (if open
-                        (progn (org-todoist--do-sync-callback events open ast old cur-headline show-n-levels)
+                        (progn (org-todoist--do-sync-callback events ast cur-headline show-n-levels)
                                (find-file (org-todoist-file)))
-                      (save-current-buffer (org-todoist--do-sync-callback events open ast old cur-headline show-n-levels))))
-                  `(,OPEN ,ast ,old ,cur-headline ,show-n-levels)
+                      (save-current-buffer (org-todoist--do-sync-callback events ast cur-headline show-n-levels))))
+                  `(,OPEN ,ast ,cur-headline ,show-n-levels)
                   'silent
                   'inhibit-cookies)))
 
-(defun org-todoist--do-sync-callback (events open ast old cur-headline show-n-levels)
+(defun org-todoist--do-sync-callback (events ast cur-headline show-n-levels)
   "The callback to invoke after syncing with the Todoist API.
 
 `EVENTS' are the http events from the request.
-`OPEN' indicates if the Todoist buffer should be opened.
 `AST' is the current abstract syntax tree of the local Todoist buffer.
-`OLD' is the abstract syntax tree of the previous Todoist buffer.
 `CUR-HEADLINE' is the headline at point when the sync was invoked.
 `SHOW-N-LEVELS' is the number of levels of the org document to show."
   (if (plist-member events :error)
@@ -767,13 +775,13 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                (is-todoist-recurring (org-todoist--get-prop hl "is_recurring"))
                (comments (org-todoist--get-comments-text hl))
                (lr (org-element-property :LAST_REPEAT hl))
-               (last-repeat (when (and lr is-recurring) (org-timestamp-from-string lr)))
+               ;; (last-repeat (when (and lr is-recurring) (org-timestamp-from-string lr)))
                (oldtask (org-todoist--get-by-id nil id old))
                (oldsection (org-todoist--get-section-id-position-non-default oldtask))
                (oldparenttask (org-todoist--get-task-id-position oldtask))
                (oldproj (org-todoist--get-project-id-position oldtask))
                (old-todo-type (org-element-property :todo-type oldtask))
-               (old-todo-kw (org-element-property :todo-keyword oldtask))
+               ;; (old-todo-kw (org-element-property :todo-keyword oldtask))
                (oldtitle (org-element-property :raw-value oldtask))
                (olddesc (org-todoist--description-text oldtask))
                (oldpri (org-todoist--get-priority oldtask))
@@ -1128,7 +1136,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                (org-element-extract node))
              (when (eq t (assoc-default 'is_archived proj))
                (org-todoist--archive node))))
-  (org-todoist--sort-by-child-order AST "child_order")
+  ;; (org-todoist--sort-by-child-order AST "child_order")
   (dolist (proj (org-todoist--project-nodes AST))
     (when-let* ((pid (org-todoist--get-prop proj 'parent_id))
                 (parent (org-todoist--get-by-id org-todoist--project-type pid AST)))
@@ -1213,10 +1221,10 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                 nil
                 sect
                 org-todoist--section-skip-list))))
-  (org-todoist--label-default-sections AST)
-  (dolist (proj (org-todoist--project-nodes AST))
-    ;; TODO add default section here? Otherwise might not be added to new projects without manually added default section?
-    (org-todoist--sort-by-child-order proj "section_order" org-todoist--section-type)))
+  (org-todoist--label-default-sections AST))
+;; (dolist (proj (org-todoist--project-nodes AST))
+;;   ;; TODO add default section here? Otherwise might not be added to new projects without manually added default section?
+;;   (org-todoist--sort-by-child-order proj "section_order" org-todoist--section-type))
 
 (defun org-todoist--project-nodes (AST)
   "Get all Todoist project nodes within the syntax tree, `AST'."
@@ -1416,9 +1424,9 @@ inactive."
                          (parenttask (org-todoist--get-by-id org-todoist--task-type parenttaskid AST))
                          (wrong-spot (not (cl-equalp parenttaskid (org-todoist--get-task-id-position task)))))
                (push parenttask with-child)
-               (org-todoist--adopt-sub parenttask task)))
-    (dolist (parent with-child)
-      (org-todoist--sort-by-child-order parent "child_order"))))
+               (org-todoist--adopt-sub parenttask task)))))
+;; (dolist (parent with-child)
+;;   (org-todoist--sort-by-child-order parent "child_order"))
 
 (defun org-todoist--adopt-sub (PARENT CHILD)
   "Adopt `CHILD' under `PARENT' and increase the :level to parent + 1."
@@ -1453,9 +1461,9 @@ appropriate symbol representation."
   (let ((val (org-todoist--get-prop NODE PROPERTY)))
     (if (stringp val) (string-to-number val) val)))
 
-(defun org-todoist--sort-by-child-order (NODE PROPERTY &optional TYPE)
-  "WIP Sort children of `TYPE' under `NODE' by numeric `PROPERTY'."
-  nil)
+;; (defun org-todoist--sort-by-child-order (NODE PROPERTY &optional TYPE)
+;;   "WIP Sort children of `TYPE' under `NODE' by numeric `PROPERTY'."
+;;   nil)
 ;; (let* ((children (org-element-map NODE 'headline
 ;;                    (lambda (hl) (when (and (eq (org-todoist--first-parent-of-type hl 'headline) NODE)
 ;;                                            (org-todoist--get-prop hl PROPERTY) ;; only move children with the property
@@ -1481,10 +1489,10 @@ appropriate symbol representation."
 (defun org-todoist--set-priority (NODE PRIORITY)
   "Set priority of `NODE' to equivalent of Todoist `PRIORITY'."
   (org-element-put-property NODE :priority (cond
-                                            ((equal PRIORITY 4) ?A)
-                                            ((equal PRIORITY 3) ?B)
-                                            ((equal PRIORITY 2) ?C)
-                                            ((equal PRIORITY 1) ?D))))
+                                            ((equal PRIORITY 4) org-todoist-p1)
+                                            ((equal PRIORITY 3) org-todoist-p2)
+                                            ((equal PRIORITY 2) org-todoist-p3)
+                                            ((equal PRIORITY 1) org-todoist-p4))))
 
 (defun org-todoist--get-priority (NODE)
   "Get the Todoist priority level of `NODE'."
@@ -1494,11 +1502,11 @@ appropriate symbol representation."
 (defun org-todoist--get-priority-cond (priority)
   "Get the Todoist priority level of `PRIORITY'."
   (cond
-   ((equal priority ?A) 4)
-   ((equal priority ?B) 3)
-   ((equal priority ?C)  2)
-   ((equal priority ?D)  1)
-   (t (org-todoist--get-priority-cond org-priority-default))))
+   ((equal priority org-todoist-p1) 4)
+   ((equal priority org-todoist-p2) 3)
+   ((equal priority org-todoist-p3)  2)
+   ((equal priority org-todoist-p4)  1)
+   (t (org-todoist--get-priority-cond org-todoist-priority-default))))
 
 (defun org-todoist--set-todo (NODE CHECKED &optional DELETED)
   "Set the TODO state of `NODE' from the `CHECKED' and `DELETED' properties.
