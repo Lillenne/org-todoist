@@ -490,8 +490,8 @@ the Todoist project, section, and optionally parent task."
       (when org-todoist-log-last-response
         (org-todoist--set-last-response resp)
         (setq org-todoist--last-response (json-read-from-string resp))))
-    (org-todoist--parse-response org-todoist--last-response ast)
-    (org-todoist--handle-display cur-headline show-n-levels)
+    (when (org-todoist--parse-response org-todoist--last-response ast)
+      (org-todoist--handle-display cur-headline show-n-levels))
     (message "Sync complete.")))
 
 (defun org-todoist--get-todoist-buffer ()
@@ -743,7 +743,8 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
 
 (defun org-todoist--is-ignored (NODE)
   "If the `NODE' should be ignored."
-  (org-element-lineage-map NODE #'org-todoist--is-ignored-type 'headline t t))
+  (or (member (org-todoist--get-todoist-type NODE t) `(,org-todoist--user-node-type ,org-todoist--metadata-node-type))
+      (org-element-lineage-map NODE #'org-todoist--is-ignored-type 'headline t t)))
 
 (defun org-todoist--is-ignored-type (NODE)
   "If the `NODE' has the `org-todoist--ignored-node-type'."
@@ -783,10 +784,10 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                (section (org-todoist--get-section-id-position-non-default hl))
                (parenttask (org-todoist--get-task-id-position hl))
                (rid (org-element-property :RESPONSIBLE_UID hl))
-               (is-recurring (org-todoist--task-is-recurring hl))
+               ;; (is-recurring (org-todoist--task-is-recurring hl))
                (is-todoist-recurring (org-todoist--get-prop hl "is_recurring"))
                (comments (org-todoist--get-comments-text hl))
-               (lr (org-element-property :LAST_REPEAT hl))
+               ;; (lr (org-element-property :LAST_REPEAT hl))
                ;; (last-repeat (when (and lr is-recurring) (org-timestamp-from-string lr)))
                (oldtask (org-todoist--get-by-id nil id old))
                (oldsection (org-todoist--get-section-id-position-non-default oldtask))
@@ -1592,12 +1593,21 @@ If created, use `DEFAULT' text."
   (when (equal (org-todoist--get-prop NODE org-todoist--type) TYPE) NODE))
 
 (defun org-todoist--update-file (AST)
-  "Replace the org-todoist file with the org representation `AST'."
+  "Replace the org-todoist file with the org representation `AST'.
+
+RETURN a value representing if the buffer was modified."
   (with-current-buffer
       (org-todoist--get-todoist-buffer)
-    (erase-buffer)
-    (insert (org-todoist-org-element-to-string AST))
-    (save-buffer)))
+    (save-restriction
+      (widen)
+      (let* ((str (org-todoist-org-element-to-string AST))
+             (bss (buffer-substring-no-properties (point-min) (point-max)))
+             (not-modify (string= str bss)))
+        (unless not-modify
+          (erase-buffer)
+          (insert str)
+          (save-buffer))
+        (not not-modify)))))
 
 (defun org-todoist--file-ast ()
   "Parse the AST of the `'org-todoist-file'."
