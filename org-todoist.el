@@ -597,8 +597,15 @@ the Todoist project, section, and optionally parent task."
 (defun org-todoist--add-repeater (TIMESTAMP STRING)
   "Add a repeater value to `TIMESTAMP' from Todoist `STRING'."
   ;; TODO more repeater cases https://todoist.com/help/articles/introduction-to-recurring-due-dates-YUYVJJAV
-  (let ((match (s-match "[[:alpha:]]+\\s-*\\([[:digit:]]*\\)\\s-*\\([[:alpha:]]+\\)" STRING)))
-    (when (and match (member (nth 2 match) '("week" "weeks" "month" "months" "day" "days" "hour" "hours" "year" "years")))
+  (let ((match (s-match "ev[[:alpha:]]+!?\\s-+\\([[:digit:]]*\\)\\s-*\\([[:alpha:]]+\\)\\(.*\\)" STRING)))
+    (when (and match (s-blank? (nth 3 match)) (member (nth 2 match) '("week" "weeks" "month" "months" "day" "days" "hour" "hours" "year" "years"
+                                                                      "mon" "monday"
+                                                                      "tue" "tues" "tuesday"
+                                                                      "wed" "wednesday"
+                                                                      "thu" "thur" "thurs" "thursday"
+                                                                      "fri" "friday"
+                                                                      "sat" "saturday"
+                                                                      "sun" "sunday")))
       (org-element-put-property TIMESTAMP :repeater-type (if (s-contains? "!" STRING) 'restart 'cumulate))
       (org-element-put-property TIMESTAMP :repeater-unit (org-todoist--get-repeater-symbol (nth 2 match)))
       (org-element-put-property TIMESTAMP :repeater-value (if (s-blank? (cadr match)) 1 (string-to-number (cadr match)))))))
@@ -610,7 +617,8 @@ the Todoist project, section, and optionally parent task."
    ((s-contains? "day" TIME-UNIT-STRING t) 'day)
    ((s-contains? "month" TIME-UNIT-STRING t) 'month)
    ((s-contains? "year" TIME-UNIT-STRING t) 'year)
-   ((s-contains? "hour" TIME-UNIT-STRING t) 'hour)))
+   ((s-contains? "hour" TIME-UNIT-STRING t) 'hour)
+   (t 'week)))
 
 (defun org-todoist--task-is-recurring (TASK)
   "If `TASK' is a recurring task."
