@@ -809,6 +809,9 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                (oldcomments (org-todoist--get-comments-text oldtask)))
           (unless (org-todoist--is-ignored hl)
 
+            (when (or (s-contains? "&" desc) (--any? (s-contains? "&" it) comments))
+              (error "ERROR in org-todoist: Comments and description elements currently cannot contain the ampersand (\"&\") character. See issue #9 on GitHub https://github.com/lillenne/org-todoist"))
+
             ;; new object. Create temp id
             (unless id
               (setq id (org-id-uuid))
