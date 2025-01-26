@@ -1564,8 +1564,12 @@ appropriate symbol representation."
   "T if the `NODE' is a paragraph element not in a drawer directly under `PARENT'."
   ;; TODO this doesn't seem to be working properly. Doesn't filter out items in drawers.
   (when (and
-         ;; Is a paragraph element
-         (eq (org-element-type NODE) 'paragraph)
+         ;; Is not a child of a plain-list
+         (not (org-element-lineage-map NODE #'identity 'plain-list nil t))
+         ;; Is a paragraph or plain-list element
+         (or
+          (eq (org-element-type NODE) 'paragraph)
+          (eq (org-element-type NODE) 'plain-list))
          ;; Is directly under the PARENT headline
          (eq (org-todoist--first-parent-of-type NODE 'headline) PARENT)
          ;; Is not in a drawer
@@ -1573,7 +1577,7 @@ appropriate symbol representation."
     NODE))
 
 (defun org-todoist--description-text (NODE)
-  "Combine all paragraphs under `NODE' and return the concatenated string."
+  "Combine all description elements under `NODE'."
   (mapconcat #'org-todoist-org-element-to-string (org-todoist--get-description-elements NODE)))
 
 (defun org-todoist--category-node-query-or-create (AST DEFAULT TYPE)

@@ -39,6 +39,9 @@ DEADLINE: <2025-01-01 Wed 00:01> SCHEDULED: <2024-12-31 Tue 23:59>
 Description
 
 More description
+
+- [ ] With a plain list
+- [ ] second bullet
 ***** TODO Subtask
 :PROPERTIES:
 :TODOIST_TYPE: TASK

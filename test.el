@@ -143,6 +143,9 @@
   (should (string-equal-ignore-case "Description
 
 More description
+
+- [ ] With a plain list
+- [ ] second bullet
 " (org-todoist--description-text (org-todoist--test-task)))))
 
 (ert-deftest org-todoist--test-update-file ()
