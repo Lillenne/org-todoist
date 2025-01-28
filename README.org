@@ -162,6 +162,8 @@ Org Todoist requires a [[https://todoist.com/help/articles/find-your-api-token-J
 #+begin_src emacs-lisp
 (setq org-todoist-api-token "<your-token>")
 #+end_src
+
+Additionally, Todoist markdown lists use 4 spaces vs the default 2 spaces for org plain lists. This is compenated for by using a file-local variable in the ~org-todoist-file~ header to set ~org-list-indent-offset~ to 2 (2 base + 2 offset = Todoist's 4). However, this means that when accessing the file for the first time, you will be prompted to allow "potentially unsafe" file-local variables. *You must accept this or manually set the value otherwise this may cause sync errors*.
 ** Optional
 - ~org-todoist-delete-remote-items~ - If non-nil, delete items no longer present in the org todoist buffer after the last sync. *This will also delete tasks refiled or archived to a separate file from Todoist*.
 - ~org-todoist-file~ - The file to use for Todoist tasks.

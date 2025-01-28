@@ -1111,7 +1111,8 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
   "Insert a header appropriate for the Todoist org file."
   ;; TODO use element api
   (goto-char (point-min))
-  (insert "#+title: Todoist
+  (insert "# -*- org-list-indent-offset: 2; -*-
+#+title: Todoist
 #+STARTUP: hidedrawers
 #+STARTUP: logdone
 #+STARTUP: logdrawer
@@ -1411,16 +1412,17 @@ inactive."
                                                    proj))
                   (title (assoc-default 'content data))
                   (description (assoc-default 'description data))
+                  (parent-id (assoc-default 'parent_id data))
                   (task (org-todoist--get-or-create-node section org-todoist--task-type id title description data org-todoist--task-skip-list AST))
                   (tags (assoc-default 'labels data)))
              (if (eq t (assoc-default 'is_deleted data))
                  (org-element-extract task)
 
-               ;; If unsectioned, add to the default section in that project
-               (unless section (setq section (org-todoist--get-by-id org-todoist--section-type org-todoist--default-id proj)))
+               ;; If unsectioned and doesn't have a parent task, add to the default section in that project
+               (unless (or section parent-id) (setq section (org-todoist--get-by-id org-todoist--section-type org-todoist--default-id proj)))
 
                ;; check if we need to move sections
-               (unless (cl-equalp (org-todoist--get-section-id-position task) section-id)
+               (unless (or parent-id (cl-equalp (org-todoist--get-section-id-position task) section-id))
                  (org-element-extract task)
                  (org-element-adopt section task))
 
