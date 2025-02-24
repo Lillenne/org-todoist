@@ -1909,11 +1909,13 @@ NOTE this will irreversibly discard all data not stored in Todoist
 This function is often used in development, but end users will likely
 have no need for it.
 
-With `ARG', do not open the Todoist buffer after sync."
+With single prefix `ARG', do not open the Todoist buffer after sync.
+With double prefix `ARG', do not open the Todoist buffer after sync."
   (interactive "P")
   (when (get-buffer org-todoist-file)
     (kill-buffer org-todoist-file))
-  (delete-file (org-todoist-file))
+  (when (eql 16 (car ARG))
+    (delete-file (org-todoist-file)))
   (delete-file (org-todoist--storage-file "PREVIOUS.json"))
   (delete-file (org-todoist--storage-file org-todoist--sync-token-file))
   (delete-file (org-todoist--storage-file org-todoist--sync-buffer-file))
