@@ -101,6 +101,10 @@ respect the visibility of the item at pos.
 5=root tasks + 1 level of subtasks
 <0 no fold")
 
+(defvar org-todoist-show-special nil
+  "Symbol for how to display the todoist buffer after sync.
+`'todo-tree' for `org-show-todo-tree'.")
+
 (defvar org-todoist-todo-keyword "TODO" "TODO keyword for active Todoist tasks.")
 
 (defvar org-todoist-done-keyword "DONE" "TODO keyword for completed Todoist tasks.")
@@ -523,7 +527,8 @@ the Todoist project, section, and optionally parent task."
           (progn (when pos (goto-char pos))
                  (org-fold-show-context 'todoist)
                  (recenter))
-        (goto-char (point-min))))))
+        (goto-char (point-min)))
+      (when (eq 'todo-tree org-todoist-show-special) (org-show-todo-tree nil)))))
 
 (defun org-todoist--first-parent-of-type (NODE TYPES)
   "Gets the first parent of `NODE' which is one of the given `TYPES'.
