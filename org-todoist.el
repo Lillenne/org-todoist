@@ -178,6 +178,9 @@ this directory must be accessible on all PCs running the sync command.")
 (defvar org-todoist-log-last-response t)
 (defvar org-todoist--last-response nil "The last parsed response, if any and `org-todoist-log-last-response' is non-nil.")
 (defvar org-todoist-keep-old-sync-tokens nil)
+(defvar org-todoist--request-preview nil
+  "What the commands section of the next request will be.
+Set by `org-todoist--push-test'")
 
 (defun org-todoist--set-last-response (JSON)
   "Store the last Todoist response `JSON' to a file."
@@ -425,11 +428,14 @@ the Todoist project, section, and optionally parent task."
    (lambda (data)
      (if (null (cdr data)) "[]"
        (concat (car data) "="
-               (if (listp (cdr data))
-                   (json-encode (cdr data))
-	         (if (stringp (cdr data))
-                     (cdr data)
-                   (prin1-to-string (cdr data)))))))
+               ;; Todoist API does not accept "&" within elements. It is only allowed
+               ;; for separating key-value pairs in the x-www-form-urlencoded body.
+               (string-replace "&" "%26"
+                               (if (listp (cdr data))
+                                   (json-encode (cdr data))
+	                         (if (stringp (cdr data))
+                                     (cdr data)
+                                   (prin1-to-string (cdr data))))))))
    (-filter (lambda (item) (cdr item)) DATA)
    "&"))
 
@@ -694,8 +700,12 @@ the wrong headline!"
   (org-todoist--date-to-todoist (org-todoist--last-recurring-task-completion TASK)))
 
 (defun org-todoist--push-test ()
-  "Return the commands that will be executed on next sync."
-  (org-todoist--push (org-todoist--file-ast) (org-todoist--get-last-sync-buffer-ast)))
+  "Return the commands that will be executed on next sync.
+Sets `org-todoist--request-preview' to the wire-encoded request."
+  (let* ((request-data `(("commands" . , (org-todoist--push (org-todoist--file-ast)
+                                                            (org-todoist--get-last-sync-buffer-ast)))))
+         (url-request-data (encode-coding-string (org-todoist--encode request-data) 'utf-8)))
+    (setq org-todoist--request-preview url-request-data)))
 
 (defun org-todoist--timestamp-times-equal (T1 T2)
   "Equality comparison for org timestamp elements `T1' and `T2'."
