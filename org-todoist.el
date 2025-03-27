@@ -192,7 +192,7 @@ Set by `org-todoist--push-test'")
   "Send an item_close request for TODO at point."
   (defvar org-state) ; silence byte compilation warning for org-state, which will already be defined here
   (when (and (equal org-state org-todoist-done-keyword)
-             (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point))))
+             (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point)) t))
     (when-let* ((id (org-entry-get nil org-todoist--id-property))
                 ;; (cur-headline (org-entry-get nil "ITEM"))
                 (url-request-method org-todoist-http-method)
@@ -590,7 +590,7 @@ the Todoist project, section, and optionally parent task."
                    ;; ("string" . ,dl)
                    ;; ("timezone" . ,(if org-todoist-tz org-todoist-tz (cadr (current-time-zone))))
                    ))
-            (is-recurring (org-todoist--task-is-recurring NODE)))
+            (is-recurring (org-todoist--task-is-recurring NODE KEYWORD)))
         ;; (when (and (eq KEYWORD :scheduled) is-recurring)
         (when is-recurring
           (push `("is_recurring" . ,t) res)
@@ -631,9 +631,20 @@ the Todoist project, section, and optionally parent task."
    ((s-contains? "hour" TIME-UNIT-STRING t) 'hour)
    (t 'week)))
 
-(defun org-todoist--task-is-recurring (TASK)
-  "If `TASK' is a recurring task."
-  (org-element-property :repeater-type (org-element-property :scheduled TASK)))
+(defun org-todoist--task-is-recurring (TASK &optional KEYWORD)
+  "If `TASK' is a recurring task.
+
+If `KEYWORD' is `:deadline', check if the deadline is repeating instead
+of the scheduled time.
+If `KEYWORD' is t, check both scheduled and
+deadline properties.
+Else check scheduled only."
+  (cond ((eq KEYWORD :deadline)
+         (org-element-property :repeater-type (org-element-property :deadline TASK)))
+        ((eq KEYWORD t)
+         (or (org-element-property :repeater-type (org-element-property :deadline TASK))
+             (org-element-property :repeater-type (org-element-property :scheduled TASK))))
+        (t (org-element-property :repeater-type (org-element-property :scheduled TASK)))))
 
 (defun org-todoist--log-drawer (HL)
   "Gets the LOGBOOK drawer for `HL'."
@@ -692,7 +703,7 @@ the wrong headline!"
 
 (defun org-todoist--last-recurring-task-completion (TASK)
   "Get the :LAST_REPEAT property of a `TASK'."
-  (when (org-todoist--task-is-recurring TASK)
+  (when (org-todoist--task-is-recurring TASK t)
     (org-timestamp-from-string (org-element-property :LAST_REPEAT TASK))))
 
 (defun org-todoist--last-recurring-task-completion-as-doist (TASK)
