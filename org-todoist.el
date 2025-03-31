@@ -1927,16 +1927,17 @@ With `ARG', do not open the Todoist buffer after sync."
   (org-todoist--do-sync (org-todoist--get-sync-token) (null ARG)))
 
 (defun org-todoist--reset (&optional ARG)
-  "Delete the Todoist file and perform a full sync from Todoist.
-
-NOTE this will irreversibly discard all data not stored in Todoist
-\(e.g., time tracking information and ignored subtrees.\).
+  "Perform a full sync from Todoist.
 
 This function is often used in development, but end users will likely
 have no need for it.
 
 With single prefix `ARG', do not open the Todoist buffer after sync.
-With double prefix `ARG', do not open the Todoist buffer after sync."
+
+With double prefix `ARG', do not open the Todoist buffer after sync.
+NOTE this will irreversibly discard all data not stored in Todoist
+\(e.g., time tracking information and ignored sub-trees.\)."
+
   (interactive "P")
   (when (get-buffer org-todoist-file)
     (kill-buffer org-todoist-file))
