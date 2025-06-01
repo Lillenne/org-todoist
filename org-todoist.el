@@ -9,7 +9,7 @@
 ;; Version: 0.0.1
 ;; Keywords: calendar org todoist
 ;; Homepage: https://github.com/lillenne/org-todoist
-;; Package-Requires: ((emacs "29.1") (s "1.13") (org "9.7.19") (ts "0.3") (dash "2.19.1"))
+;; Package-Requires: ((emacs "30.1") (s "1.13") (org "9.7.19") (ts "0.3") (dash "2.19.1"))
 ;;
 ;; This file is not part of GNU Emacs.
 ;;
@@ -66,6 +66,11 @@ This value must fall between `org-priority-lowest' and `org-priority-highest'.")
 (defvar org-todoist-delete-remote-items nil
   "Delete items on Todoist when deleted from the variable `org-todoist-file'.
 WARNING items archived to sibling files will be detected as deleted!")
+
+(defvar org-todoist-extract-deleted nil
+  "Non-nil if remotely deleted items should be removed from the org file.
+
+Otherwise, leave deleted items in tree but mark as ignored and canceled")
 
 (defvar org-todoist-file "todoist.org" "The name of the todoist org file.
 If relative, it is taken as relative to the org directory.")
@@ -1173,7 +1178,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                         proj
                         org-todoist--project-skip-list)))
              (when (eq t (assoc-default 'is_deleted proj))
-               (org-element-extract node))
+               (org-todoist--handle-deletion node))
              (when (eq t (assoc-default 'is_archived proj))
                (org-todoist--archive node))))
   ;; (org-todoist--sort-by-child-order AST "child_order")
@@ -1184,6 +1189,15 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
     (unless (member org-todoist--default-section-name (org-todoist--get-section-titles proj))
       (let ((default-section (org-todoist--create-node org-todoist--section-type org-todoist--default-section-name nil nil proj)))
         (org-todoist--add-prop default-section org-todoist--id-property org-todoist--default-id)))))
+
+(defun org-todoist--handle-deletion (node)
+  "Handle remote deletion of `NODE'."
+  (if org-todoist-extract-deleted
+      (org-element-extract node)
+    (org-todoist--insert-identifier node org-todoist--ignored-node-type)
+    ;; To-do status is already handled for tasks, but this will mark deleted sections
+    ;; and projects as canceled to-do items as well
+    (org-todoist--set-todo node nil t)))
 
 (defun org-todoist--get-tasks (ITEM)
   "Get Todoist task headlines directly under `ITEM'."
@@ -1245,13 +1259,14 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                  ;; Section already exists
                  (if (eq t (assoc-default 'is_deleted sect))
                      ;; but it needs to be deleted
-                     (org-element-extract section)
+                     (org-todoist--handle-deletion section)
                    (if (cl-equalp projid targetprojid)
                        ;; Section is under the right project, add props only
                        (org-todoist--add-all-properties section sect org-todoist--section-skip-list)
                      ;; Move to the correct project
-                     (org-element-extract section)
-                     (org-element-adopt (org-todoist--get-by-id org-todoist--project-type targetprojid AST) section)))
+                     (org-element-adopt
+                         (org-todoist--get-by-id org-todoist--project-type targetprojid AST)
+                       (org-element-extract section))))
                ;; Otherwise make the section
                (org-todoist--get-or-create-node
                 (org-todoist--get-by-id org-todoist--project-type targetprojid AST)
@@ -1430,32 +1445,39 @@ inactive."
            (let* ((id (assoc-default 'id data))
                   (proj (org-todoist--get-by-id org-todoist--project-type (assoc-default 'project_id data) AST))
                   (section-id (assoc-default 'section_id data))
-                  (section (org-todoist--get-by-id org-todoist--section-type (if section-id section-id org-todoist--default-id)
+                  (section (org-todoist--get-by-id org-todoist--section-type (or section-id org-todoist--default-id)
                                                    ;; search in project, since the section search will match the default section if there is no section
                                                    proj))
                   (title (assoc-default 'content data))
                   (description (assoc-default 'description data))
                   (parent-id (assoc-default 'parent_id data))
-                  (task (org-todoist--get-or-create-node section org-todoist--task-type id title description data org-todoist--task-skip-list AST))
+                  (deleted (eq t (assoc-default 'is_deleted data)))
+                  (task (if deleted
+                            (org-todoist--get-by-id org-todoist--task-type id AST)
+                          (org-todoist--get-or-create-node section org-todoist--task-type id
+                                                           title description data org-todoist--task-skip-list AST)))
                   (tags (assoc-default 'labels data)))
-             (if (eq t (assoc-default 'is_deleted data))
-                 (org-element-extract task)
+             (when task ; Not sure if we might receive an update that a new task was deleted. Catch this
+                                        ; scenario here
+               (if deleted
+                   (org-todoist--handle-deletion task)
 
-               ;; If unsectioned and doesn't have a parent task, add to the default section in that project
-               (unless (or section parent-id) (setq section (org-todoist--get-by-id org-todoist--section-type org-todoist--default-id proj)))
+                 ;; If unsectioned and doesn't have a parent task, add to the default section in that project
+                 (unless (or section parent-id)
+                   (setq section (org-todoist--get-by-id org-todoist--section-type org-todoist--default-id proj)))
 
-               ;; check if we need to move sections
-               (unless (or parent-id (cl-equalp (org-todoist--get-section-id-position task) section-id))
-                 (org-element-extract task)
-                 (org-element-adopt section task))
+                 ;; check if we need to move sections
+                 (unless (or parent-id (cl-equalp (org-todoist--get-section-id-position task) section-id))
+                   (org-element-extract task)
+                   (org-element-adopt section task))
 
-               (dotimes (i (length tags))
-                 (org-todoist--add-tag task (aref tags i)))
-               (org-todoist--schedule task data)
-               (org-todoist--set-effort task data)
-               (org-todoist--set-priority task (assoc-default 'priority data))
-               ;; TODO checked vs is_archived?
-               (org-todoist--set-todo task (assoc-default 'checked data) (assoc-default 'is_deleted data)))))
+                 (dotimes (i (length tags))
+                   (org-todoist--add-tag task (aref tags i)))
+                 (org-todoist--schedule task data)
+                 (org-todoist--set-effort task data)
+                 (org-todoist--set-priority task (assoc-default 'priority data))
+                 ;; TODO checked vs is_archived?
+                 (org-todoist--set-todo task (assoc-default 'checked data) (assoc-default 'is_deleted data))))))
 
   ;; second loop to set parent tasks after all have been created
   (let ((with-child nil)) ; Only sort child tasks on the first go around. If you move it, you probably moved it for a reason?
@@ -1552,13 +1574,16 @@ appropriate symbol representation."
 (defun org-todoist--set-todo (NODE CHECKED &optional DELETED)
   "Set the TODO state of `NODE' from the `CHECKED' and `DELETED' properties.
 `CHECKED' and `DELETED' are from the Todoist API response."
-  (if (or (eql t CHECKED) ; :json-false for false currently, t for true
-          (eql t DELETED))
-      (progn
-        (org-element-put-property NODE :todo-keyword (if (eql t DELETED) org-todoist-deleted-keyword org-todoist-done-keyword))
-        (org-element-put-property NODE :todo-type 'done))
-    (org-element-put-property NODE :todo-keyword org-todoist-todo-keyword)
-    (org-element-put-property NODE :todo-type 'todo)))
+  (cond ((eql t DELETED)
+         (org-element-put-property NODE :todo-keyword org-todoist-deleted-keyword)
+         (org-element-put-property NODE :todo-type 'done))
+        ((eql t CHECKED)
+         (org-element-put-property NODE :todo-keyword org-todoist-done-keyword)
+         (org-element-put-property NODE :todo-type 'done))
+        (t
+         (org-element-put-property NODE :todo-type 'todo)
+         (unless (org-element-property :todo-keyword NODE)
+           (org-element-put-property NODE :todo-keyword org-todoist-todo-keyword)))))
 
 (defun org-todoist--root (NODE)
   "Gets the syntax root of `NODE'."
