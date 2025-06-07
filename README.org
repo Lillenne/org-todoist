@@ -2,7 +2,7 @@
 #+OPTIONS: f:t
 
 * Org Todoist: What is it?
-An *Emacs package for bidirectional incremental sync* of [[https://orgmode.org/][Org Mode]] elements with [[https://todoist.com/][Todoist]] using org /exactly how you normally would in Emacs Org Mode/.
+An Emacs package for bidirectional incremental sync of [[https://orgmode.org/][Org Mode]] elements with [[https://todoist.com/][Todoist]] using org /exactly how you normally would in Emacs Org Mode/.
 
 [[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/demo.png]]
 
@@ -23,11 +23,10 @@ An *Emacs package for bidirectional incremental sync* of [[https://orgmode.org/]
 - CRUD[fn:1] new sections
 - CRUD[fn:1] new projects
 - Refile tasks and sections to other sections and projects
-
-Org Todoist also /supports collaboration with other users/ via assigning tasks and notifications.
+- /Collaboration with other users/ via assigning tasks and notifications.
 
 ** How it works
-Commands are automatically detected and batched by diffing the current ~org-todoist-file~ with the abstract syntax tree from a snapshot of the previous sync and nodes are updated in place using a single asynchronous request, meaning /metadata (such as time tracking information and additional properties) is retained/.
+Commands are automatically detected and batched by diffing the current ~org-todoist-file~ with the abstract syntax tree from a snapshot of the previous sync and nodes are updated in place using a single asynchronous request, meaning metadata, such as time tracking information, /is retained/.
 
 Syncing is done using the [[https://developer.todoist.com/sync/v9/#overview][Todoist sync API]], which sends a single request for both pulling and pushing. *Local changes will overwrite remote changes!*
 
@@ -173,6 +172,7 @@ Additionally, Todoist markdown lists use 4 spaces vs the default 2 spaces for or
 - ~org-todoist-done-keyword~ - Completed tasks are given this keyword.
 - ~org-todoist-deleted-keyword~ - Tasks with this keyword are deleted remotely.
 - ~org-todoist-storage-dir~ - Directory for storing Todoist sync_tokens and the previous org file for detecting changes to push. If using multiple computers and a synced file solution, this directory must be accessible on all PCs.
+- ~org-todoist-extract-deleted~ - If remotely deleted items should be removed from the ~org-todoist-file~.
 - ~org-todoist-my-id~ - (Currently unused) Your todoist ID. This will be inferred if your name is Todoist matches ~user-full-name~. Otherwise, you can set this property to the value of "tid" in the property drawer under "Todoist Metadata" > "Collaborators" > "<your-name>".
 
 ** Troubleshooting
