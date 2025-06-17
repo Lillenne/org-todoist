@@ -352,7 +352,9 @@ the Todoist project, section, and optionally parent task."
                                         ;Implementation;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--storage-file (FILE)
   "Determine full path of `FILE' relative to the `org-todoist-storage-dir'."
-  (expand-file-name FILE org-todoist-storage-dir))
+  (let ((path (expand-file-name FILE org-todoist-storage-dir)))
+    (make-directory (file-name-directory path) t)
+    path))
 
 (defun org-todoist--set-sync-token (TOKEN)
   "Store that last Todoist sync `TOKEN'."
