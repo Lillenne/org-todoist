@@ -136,7 +136,7 @@ this directory must be accessible on all PCs running the sync command.")
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators") "The list of resource types to sync.")
 
-(defconst org-todoist-sync-endpoint "https://api.todoist.com/sync/v9/sync" "The todoist sync endpoint.")
+(defconst org-todoist-sync-endpoint "https://api.todoist.com/api/v1/sync" "The todoist sync endpoint.")
 
 (defconst org-todoist-request-type "application/x-www-form-urlencoded; charset=utf-8" "The request type for Todoist sync requests.")
 
@@ -166,11 +166,11 @@ this directory must be accessible on all PCs running the sync command.")
 
 (defconst org-todoist--sync-areas ["collaborators", "projects", "items", "sections"] "The types of Todoist items to sync.")
 
-(defconst org-todoist--project-skip-list '(name color is_deleted is_favorite is_frozen sync_id v2_id v2_parent_id view_style collapsed))
+(defconst org-todoist--project-skip-list '(name color is_deleted is_favorite is_frozen sync_id view_style is_collapsed))
 
-(defconst org-todoist--section-skip-list '(name sync_id updated_at is_deleted v2_id v2_project_id archived_at collapsed))
+(defconst org-todoist--section-skip-list '(name sync_id updated_at is_deleted archived_at is_collapsed))
 
-(defconst org-todoist--task-skip-list '(name completed_at is_deleted content duration description checked deadline due labels priority project_id section_id sync_id v2_id v2_parent_id v2_project_id v2_section_id completed_at content day_order collapsed))
+(defconst org-todoist--task-skip-list '(name completed_at is_deleted content duration description checked deadline due labels priority project_id section_id sync_id day_order is_collapsed))
 
 (defconst org-todoist--sync-token-file "SYNC-TOKEN")
 
@@ -1935,6 +1935,74 @@ to the `org-todoist--ignored-node-type'."
             (message "Can only assign users to task headlines")
           (when-let ((selectedelement (org-todoist--select-user "Assign to: ")))
             (org-set-property "responsible_uid" (org-todoist--get-prop selectedelement org-todoist--id-property))))))))
+
+;;;###autoload
+(defun org-todoist-migrate-to-v1 ()
+  "Migrate data from Todoist API v9 to v1.
+This function updates all Todoist IDs in `org-todoist-file' to the new
+format used by API v1. This should only be run once. It requires
+`org-todoist-api-token' to be set."
+  (interactive)
+  (when (y-or-n-p "This will modify your org-todoist file to be compatible with API v1. This is irreversible. Continue? ")
+    (message "Starting migration to Todoist API v1...")
+    (let* ((ast (org-todoist--file-ast))
+           (projects '())
+           (sections '())
+           (tasks '())
+           (id-map (make-hash-table :test 'equal)))
+      ;; 1. Collect all old IDs
+      (org-element-map ast 'headline
+        (lambda (hl)
+          (let ((id (org-entry-get hl org-todoist--id-property))
+                (type (org-todoist--get-todoist-type hl t)))
+            (when (and id (not (string= id org-todoist--default-id)))
+              (cond
+               ((string= type org-todoist--project-type) (push id projects))
+               ((string= type org-todoist--section-type) (push id sections))
+               ((string= type org-todoist--task-type) (push id tasks)))))))
+
+      ;; 2. Fetch new IDs from mapping endpoint
+      (message "Fetching new IDs from Todoist...")
+      (dolist (type-and-ids `(("projects" . ,projects)
+                              ("sections" . ,sections)
+                              ("tasks" . ,tasks)))
+        (let ((obj-name (car type-and-ids))
+              (ids (cdr type-and-ids)))
+          (when ids
+            (message "Migrating %s..." obj-name)
+            (while ids
+              (let* ((batch (seq-take ids 100))
+                     (ids-str (mapconcat #'identity batch ","))
+                     (url (format "https://api.todoist.com/api/v1/id_mappings/%s/%s" obj-name ids-str))
+                     (url-request-method "GET")
+                     (url-request-extra-headers `(("Authorization" . ,(concat "Bearer " org-todoist-api-token)))))
+                (with-current-buffer (url-retrieve-synchronously url)
+                  (goto-char (point-min))
+                  (if (goto-char url-http-end-of-headers)
+                      (let* ((json-string (buffer-substring-no-properties (point) (point-max)))
+                             (mappings (json-read-from-string json-string)))
+
+
+                        (dotimes (i (length mappings))
+                          (let ((mapping (aref mappings i)))
+                          (puthash (assoc-default 'old_id mapping)
+                                   (assoc-default 'new_id mapping)
+                                   id-map))))
+                    (error "Failed to fetch ID mappings for %s" obj-name))))
+              (setq ids (seq-drop ids 100))))))
+
+      ;; 3. Update IDs in AST
+      (message "Updating IDs in org file...")
+      (org-element-map ast 'headline
+        (lambda (hl)
+          (when-let* ((old-id (org-todoist--get-prop hl org-todoist--id-property))
+                      (new-id (gethash old-id id-map)))
+            (org-todoist--insert-id hl new-id))))
+
+      ;; 4. Write updated AST to file
+      (org-todoist--update-file ast)
+      (org-todoist--reset)
+      (message "Migration to API v1 complete. Your Todoist file has been updated with new IDs."))))
 
 ;;;###autoload
 (defun org-todoist-sync (&optional ARG)
