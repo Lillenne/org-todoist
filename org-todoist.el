@@ -207,6 +207,8 @@ Set by `org-todoist--push-test'")
                                                 ("uuid" . ,(org-id-uuid))
                                                 ("args" . ,args)))))))
       (setq org-todoist--sync-err nil)
+      (unless org-todoist-use-v1-api
+        (user-error "Org todoist has updated API versions! Run 'org-todoist-migrate-to-v1' and set 'org-todoist-use-v1-api' to 't' to continue using org-todoist"))
       (org-todoist--api-call
        request-data
        (lambda (response)
@@ -518,49 +520,54 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
   (let ((encoded-data (org-todoist--encode request-data)))
     (when org-todoist-log-last-request
       (setq org-todoist--last-request encoded-data))
-    (if (executable-find "curl")
-        (org-todoist--api-call-curl encoded-data callback-fn callback-args)
-      (org-todoist--api-call-url-retrieve encoded-data callback-fn callback-args))))
+    (org-todoist--api-call-url-retrieve encoded-data callback-fn callback-args)
+    ;; (if (executable-find "curl")
+    ;;   (org-todoist--api-call-curl encoded-data callback-fn callback-args)
+    ;; (org-todoist--api-call-url-retrieve encoded-data callback-fn callback-args))
+    ))
 
 (defun org-todoist--do-sync (TOKEN OPEN)
   "Diff the Todoist org file, perform the API request, and update the file.
 `TOKEN' is the previous incremental sync token.
 `OPEN' determines whether the Todoist buffer should be opened after sync."
   (when (or (null org-todoist-api-token) (not (stringp org-todoist-api-token)))
-    (error "No org-todoist-api-token API token set"))
+    (user-error "No org-todoist-api-token API token set"))
   (setq org-todoist--sync-err nil)
-  (let* ((cur-headline (if (equal (buffer-name (current-buffer)) (org-todoist-file))
-                           (org-entry-get (point) "ITEM")
-                         nil))
+  (let* ((cur-marker (point-marker))
+         (cur-headline (when (equal (buffer-file-name) (org-todoist-file))
+                         (org-entry-get (marker-position cur-marker) "ITEM")))
          (show-n-levels (when cur-headline (org-todoist--get-hl-level-at-point)))
          (ast (org-todoist--file-ast))
-         (old (org-todoist--get-last-sync-buffer-ast))
          (request-data `(("sync_token" . ,TOKEN)
                          ("resource_types" . ,(json-encode org-todoist-resource-types))
-                         ("commands" . , (org-todoist--push ast old)))))
+                         ("commands" . ,(if (equal TOKEN "*")
+                                           ;; For reset syncs, don't send any commands to preserve local changes
+                                           []
+                                         ;; Normal sync - diff against last state
+                                         (let ((old (org-todoist--get-last-sync-buffer-ast)))
+                                           (org-todoist--push ast old)))))))
     (message (if OPEN "Syncing with todoist. Buffer will open when sync is complete..." "Syncing with todoist. This may take a moment..."))
     (org-todoist--api-call
      request-data
-     (lambda (response open ast cur-headline show-n-levels)
+     (lambda (response open ast cur-marker show-n-levels)
        (if open
-           (progn (org-todoist--do-sync-callback response ast cur-headline show-n-levels)
+           (progn (org-todoist--do-sync-callback response ast cur-marker show-n-levels)
                   (find-file (org-todoist-file)))
-         (save-current-buffer (org-todoist--do-sync-callback response ast cur-headline show-n-levels))))
-     `(,OPEN ,ast ,cur-headline ,show-n-levels))))
+         (save-current-buffer (org-todoist--do-sync-callback response ast cur-marker show-n-levels))))
+     `(,OPEN ,ast ,cur-marker ,show-n-levels))))
 
-(defun org-todoist--do-sync-callback (response ast cur-headline show-n-levels)
+(defun org-todoist--do-sync-callback (response ast cur-marker show-n-levels)
   "The callback to invoke after syncing with the Todoist API.
 
 `response' is the parsed JSON response from the API.
 `AST' is the current abstract syntax tree of the local Todoist buffer.
-`CUR-HEADLINE' is the headline at point when the sync was invoked.
+`CUR-MARKER' is the marker at point when the sync was invoked.
 `SHOW-N-LEVELS' is the number of levels of the org document to show."
   (if (null response)
       (message "Sync failed. See org-todoist--sync-err for details.")
-    (progn
-      (when (org-todoist--parse-response response ast)
-        (org-todoist--handle-display cur-headline show-n-levels))
-      (message "Sync complete."))))
+    (when (org-todoist--parse-response response ast)
+      (org-todoist--handle-display cur-marker show-n-levels))
+    (message "Sync complete.")))
 
 (defun org-todoist--get-todoist-buffer ()
   "Gets the org-todoist buffer, preferring open buffers."
@@ -581,18 +588,9 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
         (org-content)
       (org-content show-n-levels))
     (org-fold-hide-drawer-all)
-    (let ((pos nil)
-          (inhibit-message t))
-      (org-map-entries (lambda ()
-                         (when (equal (org-entry-get nil "ITEM") cur-headline)
-                           (setq pos (point)))))
-      (write-file (org-todoist-file))
-      (if cur-headline
-          (progn (when pos (goto-char pos))
-                 (org-fold-show-context 'todoist)
-                 (recenter))
-        (goto-char (point-min)))
-      (when (eq 'todo-tree org-todoist-show-special) (org-show-todo-tree nil)))))
+    (write-file (org-todoist-file))
+    (when (eq 'todo-tree org-todoist-show-special) (org-show-todo-tree nil))
+    (goto-char cur-marker)))
 
 (defun org-todoist--first-parent-of-type (NODE TYPES)
   "Gets the first parent of `NODE' which is one of the given `TYPES'.
@@ -1961,10 +1959,10 @@ to the `org-todoist--ignored-node-type'."
                                           (car (org-element-resolve-deferred
                                                 (org-todoist--get-parent-of-type org-todoist--project-type (org-element-at-point)))))))
     (if (and can-assign (not (equal "t" can-assign)))
-        (message "Current project does not support task assignment!")
+        (user-error "Current project does not support task assignment!")
       (let ((type (org-entry-get nil org-todoist--type)))
         (if (and type (not (string= type org-todoist--task-type))) ; if there is no type, assume it is probably a new task.
-            (message "Can only assign users to task headlines")
+            (user-error "Can only assign users to task headlines")
           (when-let ((selectedelement (org-todoist--select-user "Assign to: ")))
             (org-set-property "responsible_uid" (org-todoist--get-prop selectedelement org-todoist--id-property))))))))
 
@@ -2033,8 +2031,8 @@ format used by API v1. This should only be run once. It requires
 
       ;; 4. Write updated AST to file
       (org-todoist--update-file ast)
-      (org-todoist--reset)
-      (message "Migration to API v1 complete. Your Todoist file has been updated with new IDs."))))
+      (message "Migration to API v1 complete. Your Todoist file has been updated with new IDs.
+You MUST set org-todoist-use-v1-api to 't' to continue using org-todoist without losing data!"))))
 
 ;;;###autoload 
 (defun org-todoist-ediff-snapshot ()
