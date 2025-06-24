@@ -2019,6 +2019,19 @@ format used by API v1. This should only be run once. It requires
       (org-todoist--reset)
       (message "Migration to API v1 complete. Your Todoist file has been updated with new IDs."))))
 
+;;;###autoload 
+(defun org-todoist-ediff-snapshot ()
+  "Compare current org-todoist file with last synced snapshot using ediff."
+  (interactive)
+  (cond ((not (file-exists-p (org-todoist-file)))
+         (message "No org-todoist-file exists - perform a sync first to create one"))
+        ((not (file-exists-p (org-todoist--storage-file org-todoist--sync-buffer-file)))
+         (message "No snapshot exists - perform a sync first to create one"))
+        (t (let ((current-buf (find-file-noselect (org-todoist-file)))
+                 (snapshot-file (org-todoist--storage-file org-todoist--sync-buffer-file)))
+             (ediff-buffers (find-file-noselect snapshot-file)
+                            current-buf)))))
+
 ;;;###autoload
 (defun org-todoist-sync (&optional ARG)
   "Perform a bidirectional incremental sync with Todoist.
