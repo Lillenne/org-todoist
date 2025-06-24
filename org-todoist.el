@@ -465,9 +465,12 @@ the Todoist project, section, and optionally parent task."
            (let ((exit-code (process-exit-status process)))
              (if (= exit-code 0)
                  (let* ((resp-str (buffer-string))
-                        (response (json-read-from-string resp-str))) ; TODO does this remove headers from the response? AI!
+                        (resp-body (save-match-data
+                                     (when (string-match "^.*?\n\n\\(.*\\)" resp-str)
+                                       (match-string 1 resp-str))))
+                        (response (json-read-from-string (or resp-body resp-str))))
                    (when org-todoist-log-last-response
-                     (org-todoist--set-last-response resp-str)
+                     (org-todoist--set-last-response resp-body)
                      (setq org-todoist--last-response response))
                    (apply callback-fn (cons response callback-args)))
                (setq org-todoist--sync-err (format "curl exited with code %d: %s" exit-code (buffer-string)))
@@ -1538,27 +1541,26 @@ appropriate symbol representation."
   "If `SYMBOL-OR-STRING' is a string, convert it to an uppercase symbol."
   (if (stringp SYMBOL-OR-STRING) (intern (concat ":" (upcase SYMBOL-OR-STRING))) SYMBOL-OR-STRING))
 
-;; (defun org-todoist--get-headline-by-title-value (NODE VALUE)
-;;   (org-element-map NODE 'headline (lambda (hl) (when (string-equal (org-element-property :raw-title hl) VALUE) hl))))
-
 (defun org-todoist--get-position (NODE PROPERTY)
   "Get the numeric value of `PROPERTY' under `NODE'."
   (let ((val (org-todoist--get-prop NODE PROPERTY)))
     (if (stringp val) (string-to-number val) val)))
 
-;; (defun org-todoist--sort-by-child-order (NODE PROPERTY &optional TYPE)
-;;   "WIP Sort children of `TYPE' under `NODE' by numeric `PROPERTY'."
-;;   nil)
-;; (let* ((children (org-element-map NODE 'headline
-;;                    (lambda (hl) (when (and (eq (org-todoist--first-parent-of-type hl 'headline) NODE)
-;;                                            (org-todoist--get-prop hl PROPERTY) ;; only move children with the property
-;;                                            (or (not TYPE)
-;;                                                (string= (org-todoist--get-todoist-type hl) TYPE)))
-;;                                   hl))))
-;;        (sorted (cl-sort children (lambda (a b) (< (org-todoist--get-position a PROPERTY) (org-todoist--get-position b PROPERTY))))))
-;;   (dolist (child sorted)
-;;     (org-element-adopt NODE (org-element-extract child))))
-;; )
+(defun org-todoist--sort-by-child-order (NODE PROPERTY &optional TYPE)
+  "Sort children of `TYPE' under `NODE' by numeric `PROPERTY'."
+  (let* ((children (org-element-map NODE 'headline
+                     (lambda (hl) (when (and (eq (org-todoist--first-parent-of-type hl 'headline) NODE)
+                                             (org-todoist--get-prop hl PROPERTY) ;; only move children with the property
+                                             (or (not TYPE)
+                                                 (string= (org-todoist--get-todoist-type hl) TYPE)))
+                                    hl))))
+         (sorted (cl-sort children (lambda (a b) 
+                                    (< (org-todoist--get-position a PROPERTY) 
+                                       (org-todoist--get-position b PROPERTY))))))
+    (dolist (child children)
+      (org-element-extract child))
+    (dolist (child sorted)
+      (org-element-adopt NODE child))))
 
 (defun org-todoist--set-effort (NODE TASK)
   "Set the EFFORT property of `NODE' using the API response data `TASK'."
