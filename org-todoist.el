@@ -453,10 +453,10 @@ the Todoist project, section, and optionally parent task."
   (let ((process-connection-type nil) ; Use a pipe
         (proc-buffer (generate-new-buffer " *org-todoist-curl*"))
         (command `("curl" "-s" "-X" ,org-todoist-http-method
-                         "-H" ,(concat "Authorization: Bearer " org-todoist-api-token)
-                         "-H" ,(concat "Content-Type: " org-todoist-request-type)
-                         "-d" ,encoded-data
-                         ,org-todoist-sync-endpoint)))
+                   "-H" ,(concat "Authorization: Bearer " org-todoist-api-token)
+                   "-H" ,(concat "Content-Type: " org-todoist-request-type)
+                   "-d" ,encoded-data
+                   ,org-todoist-sync-endpoint)))
     (set-process-sentinel
      (apply #'start-process "org-todoist-curl" proc-buffer command)
      (lambda (process event)
@@ -1555,8 +1555,8 @@ appropriate symbol representation."
                                                  (string= (org-todoist--get-todoist-type hl) TYPE)))
                                     hl))))
          (sorted (cl-sort children (lambda (a b) 
-                                    (< (org-todoist--get-position a PROPERTY) 
-                                       (org-todoist--get-position b PROPERTY))))))
+                                     (< (org-todoist--get-position a PROPERTY)
+                                        (org-todoist--get-position b PROPERTY))))))
     (dolist (child children)
       (org-element-extract child))
     (dolist (child sorted)
@@ -2000,9 +2000,9 @@ format used by API v1. This should only be run once. It requires
 
                         (dotimes (i (length mappings))
                           (let ((mapping (aref mappings i)))
-                          (puthash (assoc-default 'old_id mapping)
-                                   (assoc-default 'new_id mapping)
-                                   id-map))))
+                            (puthash (assoc-default 'old_id mapping)
+                                     (assoc-default 'new_id mapping)
+                                     id-map))))
                     (error "Failed to fetch ID mappings for %s" obj-name))))
               (setq ids (seq-drop ids 100))))))
 
