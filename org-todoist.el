@@ -240,7 +240,9 @@ Set by `org-todoist--push-test'")
          (ast (org-todoist--file-ast))
          (projects (org-todoist--project-nodes ast))
          (project-names (--map (org-element-property :raw-value it) projects))
-         (selected-project (if (and org-todoist-infer-project-for-capture (require 'projectile nil 'no-error))
+         (selected-project (if (and org-todoist-infer-project-for-capture
+                                    (require 'projectile nil 'no-error)
+                                    (fboundp 'projectile-project-name))
                                (if (string= (projectile-project-name) "-")
                                    (completing-read "Which project? " project-names)
                                  (projectile-project-name))
@@ -311,7 +313,9 @@ the Todoist project, section, and optionally parent task."
            (ast (org-todoist--file-ast))
            (projects (org-todoist--project-nodes ast))
            (project-names (--map (org-element-property :raw-value it) projects))
-           (selected-project (if (and org-todoist-infer-project-for-capture (require 'projectile nil 'no-error))
+           (selected-project (if (and org-todoist-infer-project-for-capture
+                                      (require 'projectile nil 'no-error)
+                                      (fboundp 'projectile-project-name))
                                  (if (string= (projectile-project-name) "-")
                                      (completing-read "Which project? " project-names)
                                    (projectile-project-name))
@@ -1490,16 +1494,16 @@ inactive."
                   (proj (org-todoist--get-by-id org-todoist--project-type (assoc-default 'project_id data) AST))
                   (section-id (assoc-default 'section_id data))
                   (section (if section-id
-                              (org-todoist--get-by-id org-todoist--section-type section-id proj)
-                            ;; If no section, ensure default section exists then use it
-                            (or (org-todoist--get-by-id org-todoist--section-type org-todoist--default-id proj)
-                                (let ((default-section
-                                       (org-todoist--create-node
-                                        org-todoist--section-type
-                                        org-todoist--default-section-name
-                                        nil nil proj)))
-                                  (org-todoist--insert-id default-section org-todoist--default-id)
-                                  default-section))))
+                               (org-todoist--get-by-id org-todoist--section-type section-id proj)
+                             ;; If no section, ensure default section exists then use it
+                             (or (org-todoist--get-by-id org-todoist--section-type org-todoist--default-id proj)
+                                 (let ((default-section
+                                        (org-todoist--create-node
+                                         org-todoist--section-type
+                                         org-todoist--default-section-name
+                                         nil nil proj)))
+                                   (org-todoist--insert-id default-section org-todoist--default-id)
+                                   default-section))))
                   (title (assoc-default 'content data))
                   (description (assoc-default 'description data))
                   (parent-id (assoc-default 'parent_id data))
