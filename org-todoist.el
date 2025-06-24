@@ -541,15 +541,19 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
          (request-data `(("sync_token" . ,TOKEN)
                          ("resource_types" . ,(json-encode org-todoist-resource-types))
                          ("commands" . ,(if (equal TOKEN "*")
-                                           ;; For reset syncs, don't send any commands to preserve local changes
-                                           []
-                                         ;; Normal sync - diff against last state
-                                         (let ((old (org-todoist--get-last-sync-buffer-ast)))
-                                           (org-todoist--push ast old)))))))
+                                            ;; For reset syncs, don't send any commands to preserve local changes
+                                            []
+                                          ;; Normal sync - diff against last state
+                                          (let ((old (org-todoist--get-last-sync-buffer-ast)))
+                                            (org-todoist--push ast old)))))))
     (message (if OPEN "Syncing with todoist. Buffer will open when sync is complete..." "Syncing with todoist. This may take a moment..."))
     (org-todoist--api-call
      request-data
      (lambda (response open ast cur-marker show-n-levels)
+       (when (and (equal TOKEN "*")
+                  (eq (assoc-default 'full_sync response) :json-false))
+         (setq org-todoist--sync-err "Full sync failed - Todoist returned full_sync=false")
+         (error org-todoist--sync-err))
        (if open
            (progn (org-todoist--do-sync-callback response ast cur-marker show-n-levels)
                   (find-file (org-todoist-file)))
