@@ -166,11 +166,11 @@ this directory must be accessible on all PCs running the sync command.")
 
 (defconst org-todoist--sync-areas ["collaborators", "projects", "items", "sections"] "The types of Todoist items to sync.")
 
-(defconst org-todoist--project-skip-list '(name color is_deleted is_favorite is_frozen sync_id view_style is_collapsed))
+(defconst org-todoist--project-skip-list '(access name color is_deleted is_favorite is_frozen sync_id view_style is_collapsed))
 
 (defconst org-todoist--section-skip-list '(name sync_id updated_at is_deleted archived_at is_collapsed))
 
-(defconst org-todoist--task-skip-list '(name completed_at is_deleted content duration description checked deadline due labels priority project_id section_id sync_id day_order is_collapsed))
+(defconst org-todoist--task-skip-list '(role name completed_at is_deleted content duration description checked deadline due labels priority project_id section_id sync_id day_order is_collapsed))
 
 (defconst org-todoist--sync-token-file "SYNC-TOKEN")
 
@@ -199,30 +199,19 @@ Set by `org-todoist--push-test'")
   (when (and (equal org-state org-todoist-done-keyword)
              (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point)) t))
     (when-let* ((id (org-entry-get nil org-todoist--id-property))
-                ;; (cur-headline (org-entry-get nil "ITEM"))
-                (url-request-method org-todoist-http-method)
-                (url-request-extra-headers `(("Authorization" . ,(concat "Bearer " org-todoist-api-token))
-                                             ("Content-Type" . ,org-todoist-request-type)))
                 (args `(("id" . ,id)))
                 (request-data `(("sync_token" . ,(org-todoist--get-sync-token))
                                 ("commands" . ((("type" . "item_close")
                                                 ("uuid" . ,(org-id-uuid))
-                                                ("args" . ,args))))))
-                (url-request-data (org-todoist--encode request-data)))
+                                                ("args" . ,args)))))))
       (setq org-todoist--sync-err nil)
-      (when org-todoist-log-last-request
-        (setq org-todoist--last-request url-request-data))
-      (url-retrieve org-todoist-sync-endpoint
-                    (lambda (events)
-                      (let ((resp (progn (goto-char url-http-end-of-headers)
-                                         (decode-coding-region (point) (point-max) 'utf-8 t))))
-                        (when org-todoist-log-last-response
-                          (org-todoist--set-last-response resp)
-                          (setq org-todoist--last-response (json-read-from-string resp))))
-                      (setq org-todoist--sync-err events))
-                    nil
-                    'silent
-                    'inhibit-cookies))))
+      (org-todoist--api-call
+       request-data
+       (lambda (response)
+         (if response
+             (when-let ((token (assoc-default 'sync_token response)))
+               (org-todoist--set-sync-token token))
+           (message "item_close hook failed. See org-todoist--sync-err for details.")))))))
 
 ;; NOTE this requires it to be done from emacs and not eg. orgzly
 (add-hook 'org-after-todo-state-change-hook #'org-todoist--item-close-hook)
@@ -459,6 +448,69 @@ the Todoist project, section, and optionally parent task."
     (when (string= (org-element-property :raw-value section) org-todoist--default-section-name)
       (org-todoist--insert-id section org-todoist--default-id))))
 
+(defun org-todoist--api-call-curl (encoded-data callback-fn callback-args)
+  "Make an API call using `curl'."
+  (let ((process-connection-type nil) ; Use a pipe
+        (proc-buffer (generate-new-buffer " *org-todoist-curl*"))
+        (command `("curl" "-s" "-X" ,org-todoist-http-method
+                         "-H" ,(concat "Authorization: Bearer " org-todoist-api-token)
+                         "-H" ,(concat "Content-Type: " org-todoist-request-type)
+                         "-d" ,encoded-data
+                         ,org-todoist-sync-endpoint)))
+    (set-process-sentinel
+     (apply #'start-process "org-todoist-curl" proc-buffer command)
+     (lambda (process event)
+       (when (memq (process-status process) '(exit signal))
+         (with-current-buffer (process-buffer process)
+           (let ((exit-code (process-exit-status process)))
+             (if (= exit-code 0)
+                 (let* ((resp-str (buffer-string))
+                        (response (json-read-from-string resp-str))) ; TODO does this remove headers from the response? AI!
+                   (when org-todoist-log-last-response
+                     (org-todoist--set-last-response resp-str)
+                     (setq org-todoist--last-response response))
+                   (apply callback-fn (cons response callback-args)))
+               (setq org-todoist--sync-err (format "curl exited with code %d: %s" exit-code (buffer-string)))
+               (apply callback-fn (cons nil callback-args)))) ; Call with nil on error
+           (kill-buffer (process-buffer process))))))))
+
+(defun org-todoist--api-call-url-retrieve (encoded-data callback-fn callback-args)
+  "Make an API call using `url-retrieve'."
+  (let ((url-request-method org-todoist-http-method)
+        (url-request-extra-headers `(("Authorization" . ,(concat "Bearer " org-todoist-api-token))
+                                     ("Content-Type" . ,org-todoist-request-type)))
+        (url-request-data (encode-coding-string encoded-data 'utf-8)))
+    (url-retrieve org-todoist-sync-endpoint
+                  (lambda (status)
+                    (if (plist-get status :error)
+                        (progn
+                          (setq org-todoist--sync-err (plist-get status :error))
+                          (apply callback-fn (cons nil callback-args))) ; Call with nil on error
+                      (with-current-buffer (current-buffer)
+                        (goto-char url-http-end-of-headers)
+                        (let* ((resp-str (decode-coding-region (point) (point-max) 'utf-8 t))
+                               (response (json-read-from-string resp-str)))
+                          (when org-todoist-log-last-response
+                            (org-todoist--set-last-response resp-str)
+                            (setq org-todoist--last-response response))
+                          (apply callback-fn (cons response callback-args))))))
+                  nil
+                  'silent
+                  'inhibit-cookies)))
+
+(defun org-todoist--api-call (request-data callback-fn &optional callback-args)
+  "Make an API call to Todoist sync endpoint.
+`request-data' is an alist of request parameters.
+`callback-fn' is a function to call with the JSON response.
+`callback-args' are additional arguments for the callback.
+Uses `curl' if available, otherwise falls back to `url-retrieve'."
+  (let ((encoded-data (org-todoist--encode request-data)))
+    (when org-todoist-log-last-request
+      (setq org-todoist--last-request encoded-data))
+    (if (executable-find "curl")
+        (org-todoist--api-call-curl encoded-data callback-fn callback-args)
+      (org-todoist--api-call-url-retrieve encoded-data callback-fn callback-args))))
+
 (defun org-todoist--do-sync (TOKEN OPEN)
   "Diff the Todoist org file, perform the API request, and update the file.
 `TOKEN' is the previous incremental sync token.
@@ -466,50 +518,38 @@ the Todoist project, section, and optionally parent task."
   (when (or (null org-todoist-api-token) (not (stringp org-todoist-api-token)))
     (error "No org-todoist-api-token API token set"))
   (setq org-todoist--sync-err nil)
-  (let* ((cur-headline (if (equal (buffer-name (current-buffer)) org-todoist-file)
+  (let* ((cur-headline (if (equal (buffer-name (current-buffer)) (org-todoist-file))
                            (org-entry-get (point) "ITEM")
                          nil))
          (show-n-levels (when cur-headline (org-todoist--get-hl-level-at-point)))
-         (url-request-method org-todoist-http-method)
-         (url-request-extra-headers `(("Authorization" . ,(encode-coding-string (concat "Bearer " org-todoist-api-token) 'utf-8))
-                                      ("Content-Type" . ,org-todoist-request-type)))
          (ast (org-todoist--file-ast))
          (old (org-todoist--get-last-sync-buffer-ast))
          (request-data `(("sync_token" . ,TOKEN)
                          ("resource_types" . ,(json-encode org-todoist-resource-types))
-                         ("commands" . , (org-todoist--push ast old))))
-         (url-request-data (encode-coding-string (org-todoist--encode request-data) 'utf-8)))
-    (when org-todoist-log-last-request
-      (setq org-todoist--last-request url-request-data))
+                         ("commands" . , (org-todoist--push ast old)))))
     (message (if OPEN "Syncing with todoist. Buffer will open when sync is complete..." "Syncing with todoist. This may take a moment..."))
-    (url-retrieve org-todoist-sync-endpoint
-                  (lambda (events open ast cur-headline show-n-levels)
-                    (if open
-                        (progn (org-todoist--do-sync-callback events ast cur-headline show-n-levels)
-                               (find-file (org-todoist-file)))
-                      (save-current-buffer (org-todoist--do-sync-callback events ast cur-headline show-n-levels))))
-                  `(,OPEN ,ast ,cur-headline ,show-n-levels)
-                  'silent
-                  'inhibit-cookies)))
+    (org-todoist--api-call
+     request-data
+     (lambda (response open ast cur-headline show-n-levels)
+       (if open
+           (progn (org-todoist--do-sync-callback response ast cur-headline show-n-levels)
+                  (find-file (org-todoist-file)))
+         (save-current-buffer (org-todoist--do-sync-callback response ast cur-headline show-n-levels))))
+     `(,OPEN ,ast ,cur-headline ,show-n-levels))))
 
-(defun org-todoist--do-sync-callback (events ast cur-headline show-n-levels)
+(defun org-todoist--do-sync-callback (response ast cur-headline show-n-levels)
   "The callback to invoke after syncing with the Todoist API.
 
-`EVENTS' are the http events from the request.
+`response' is the parsed JSON response from the API.
 `AST' is the current abstract syntax tree of the local Todoist buffer.
 `CUR-HEADLINE' is the headline at point when the sync was invoked.
 `SHOW-N-LEVELS' is the number of levels of the org document to show."
-  (if (plist-member events :error)
-      (progn (setq org-todoist--sync-err events)
-             (message "Sync failed. See org-todoist--sync-err for details."))
-    (let ((resp (progn (goto-char url-http-end-of-headers)
-                       (decode-coding-region (point) (point-max) 'utf-8 t))))
-      (when org-todoist-log-last-response
-        (org-todoist--set-last-response resp)
-        (setq org-todoist--last-response (json-read-from-string resp))))
-    (when (org-todoist--parse-response org-todoist--last-response ast)
-      (org-todoist--handle-display cur-headline show-n-levels))
-    (message "Sync complete.")))
+  (if (null response)
+      (message "Sync failed. See org-todoist--sync-err for details.")
+    (progn
+      (when (org-todoist--parse-response response ast)
+        (org-todoist--handle-display cur-headline show-n-levels))
+      (message "Sync complete."))))
 
 (defun org-todoist--get-todoist-buffer ()
   "Gets the org-todoist buffer, preferring open buffers."
@@ -1148,26 +1188,6 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
 #+STARTUP: logdrawer
 "))
 
-;; (section
-;;  (:standard-properties
-;;   [1 1 1 80 80 0 nil first-section nil nil nil 1 80 nil #<buffer todoist.org<2>> nil nil #0])
-;;  (keyword
-;;   (:standard-properties
-;;    [1 1 nil nil 18 0 nil top-comment nil nil nil nil nil nil #<buffer todoist.org<2>> nil nil #1]
-;;    :key "TITLE" :value "Todoist"))
-;;  (keyword
-;;   (:standard-properties
-;;    [18 18 nil nil 40 0 nil nil nil nil nil nil nil nil #<buffer todoist.org<2>> nil nil #1]
-;;    :key "FILETAGS" :value ":todoist:"))
-;;  (keyword
-;;   (:standard-properties
-;;    [40 40 nil nil 59 0 nil nil nil nil nil nil nil nil #<buffer todoist.org<2>> nil nil #1]
-;;    :key "STARTUP" :value "logdone"))
-;;  (keyword
-;;   (:standard-properties
-;;    [59 59 nil nil 80 0 nil nil nil nil nil nil nil nil #<buffer todoist.org<2>> nil nil #1]
-;;    :key "STARTUP" :value "logdrawer")))
-
 (defun org-todoist--update-projects (PROJECTS AST)
   "Update projects in `AST' using `PROJECTS' section of Todoist sync API response."
   (cl-loop for proj across PROJECTS do
@@ -1594,11 +1614,6 @@ appropriate symbol representation."
       (setq root next))
     root))
 
-;; (defun org-todoist--assign (NODE ID AST)
-;;   (let* ((user (org-todoist--get-by-id org-todoist--collaborator-type ID AST))
-;;          (name (org-todoist--get-prop user "full_name")))
-;;     (org-todoist--add-tag NODE (concat  "@" (string-replace " " "_" name)))))
-
 (defun org-todoist--add-tag (NODE TAG)
   "Add `TAG' to `NODE'."
   (let ((tags (org-element-property :tags NODE)))
@@ -1696,9 +1711,7 @@ RETURN a value representing if the buffer was modified."
 (defun org-todoist--id-or-temp-id (NODE)
   "Get the `org-todoist--id-property' or \"temp_id\" property of `NODE'."
   (let ((id (org-todoist--get-prop NODE org-todoist--id-property)))
-    (if id
-        id
-      (org-todoist--get-prop NODE "temp_id"))))
+    (or id (org-todoist--get-prop NODE "temp_id"))))
 
 (defun org-todoist--get-project-id-position (NODE)
   "Gets the ID of the project headline the `NODE' is under."
@@ -1777,7 +1790,7 @@ If `FIRST', only get the first matching parent."
 
 (defun org-todoist--get-key (KEY)
   "Get the org property key for given `KEY'.
-This peforms any property name mapping between Todoist and org representations."
+This performs any property name mapping between Todoist and org representations."
   (if (or (eq KEY 'id)
           (and (stringp KEY)
                (string-equal-ignore-case KEY "id")))
@@ -1887,7 +1900,7 @@ Note, a \n character is appended if not present."
   "Unassign the task at point by setting the \"responsible_uid\" property to nil."
   (interactive)
   (when (org-entry-get nil "responsible_uid")
-    (org-set-property "responsible_uid" "nil")))
+    (org-delete-property "responsible_uid")))
 
 ;;;###autoload
 (defun org-todoist-ignore-subtree ()
