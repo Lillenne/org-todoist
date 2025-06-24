@@ -581,10 +581,10 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
         fb
       (find-file-noselect file))))
 
-(defun org-todoist--handle-display (cur-headline show-n-levels)
+(defun org-todoist--handle-display (cur-marker show-n-levels)
   "Handle saving and folding of the Todoist buffer.
 
-`CUR-HEADLINE' is the headline at point prior to the sync call.
+`CUR-MARKER' is the marker prior to the sync call.
 `SHOW-N-LEVELS' is the number of outline levels to show."
   (with-current-buffer (org-todoist--get-todoist-buffer)
     (unless show-n-levels (setq show-n-levels org-todoist-show-n-levels))
@@ -593,8 +593,8 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
       (org-content show-n-levels))
     (org-fold-hide-drawer-all)
     (write-file (org-todoist-file))
-    (when (eq 'todo-tree org-todoist-show-special) (org-show-todo-tree nil))
-    (goto-char cur-marker)))
+    (when (eq 'todo-tree org-todoist-show-special) (org-show-todo-tree nil)))
+  (goto-char cur-marker))
 
 (defun org-todoist--first-parent-of-type (NODE TYPES)
   "Gets the first parent of `NODE' which is one of the given `TYPES'.
@@ -1885,6 +1885,18 @@ Returns nil if not present"
           (org-element-property :value np)))
       nil t)))
 
+(defun org-todoist--remove-prop (NODE KEY)
+  "Remove property with `KEY' from `NODE's property drawer."
+  (let* ((key (org-todoist--get-key KEY))
+         (drawer (if (equal (org-element-type NODE) 'property-drawer)
+                     NODE
+                   (org-todoist--get-property-drawer NODE)))
+         (prop (when drawer
+                 (org-element-map drawer 'node-property
+                   (lambda (np) (when (org-todoist--is-property np key) np))
+                   nil t))))
+    (when prop (org-element-extract prop))))
+
 (defun org-todoist--add-all-properties (NODE PROPERTIES &optional SKIP)
   "Add or update the values of all properties in the alist `PROPERTIES'.
 Properties are added to `NODE' unless they are in plist `SKIP'.
@@ -1933,6 +1945,23 @@ Note, a \n character is appended if not present."
 (defun org-todoist--remove-ws (STRING)
   "Remove spaces from `STRING'."
   (string-replace " " "" STRING))
+
+(defun org-todoist--is-v1 ()
+  "Check if any org-todoist-ids are numeric (indicates v1 API IDs)."
+  (catch 'found
+    (org-element-map (org-todoist--file-ast) 'headline
+      (lambda (hl)
+        (when-let* ((id (org-todoist--get-prop hl org-todoist--id-property))
+                    (id-num (string-to-number id)))
+          (unless (or (zerop id-num) 
+                      (string= id org-todoist--default-id))
+            (throw 'found t))))
+      nil t)
+    nil))
+
+(defun org-todoist--is-v2 ()
+  "Check if IDs appear to be in v2 UUID format."
+  (not (org-todoist--is-v1)))
 
 ;; User functions
 
