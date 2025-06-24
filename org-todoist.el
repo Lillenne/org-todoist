@@ -63,6 +63,10 @@ This value must fall between `org-priority-lowest' and `org-priority-highest'.")
 
 (defvar org-todoist-api-token nil "The API token to use to sync with Todoist.")
 
+(defvar org-todoist-use-v1-api nil "Use Todoist API v1.
+If nil, use the deprecated Sync API v9.
+You should set this to t after running `org-todoist-migrate-to-v1'.")
+
 (defvar org-todoist-delete-remote-items nil
   "Delete items on Todoist when deleted from the variable `org-todoist-file'.
 WARNING items archived to sibling files will be detected as deleted!")
@@ -135,8 +139,6 @@ this directory must be accessible on all PCs running the sync command.")
 
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators") "The list of resource types to sync.")
-
-(defconst org-todoist-sync-endpoint "https://api.todoist.com/api/v1/sync" "The todoist sync endpoint.")
 
 (defconst org-todoist-request-type "application/x-www-form-urlencoded; charset=utf-8" "The request type for Todoist sync requests.")
 
@@ -339,6 +341,12 @@ the Todoist project, section, and optionally parent task."
 (add-hook 'org-capture-after-finalize-hook #'org-todoist--sync-after-capture)
 
                                         ;Implementation;;;;;;;;;;;;;;;;;;;;;;;;
+(defun org-todoist--sync-endpoint ()
+  "Return the correct Todoist Sync API endpoint URL."
+  (if org-todoist-use-v1-api
+      "https://api.todoist.com/api/v1/sync"
+    "https://api.todoist.com/sync/v9/sync"))
+
 (defun org-todoist--storage-file (FILE)
   "Determine full path of `FILE' relative to the `org-todoist-storage-dir'."
   (let ((path (expand-file-name FILE org-todoist-storage-dir)))
@@ -456,7 +464,7 @@ the Todoist project, section, and optionally parent task."
                    "-H" ,(concat "Authorization: Bearer " org-todoist-api-token)
                    "-H" ,(concat "Content-Type: " org-todoist-request-type)
                    "-d" ,encoded-data
-                   ,org-todoist-sync-endpoint)))
+                   ,(org-todoist--sync-endpoint))))
     (set-process-sentinel
      (apply #'start-process "org-todoist-curl" proc-buffer command)
      (lambda (process event)
@@ -483,7 +491,7 @@ the Todoist project, section, and optionally parent task."
         (url-request-extra-headers `(("Authorization" . ,(concat "Bearer " org-todoist-api-token))
                                      ("Content-Type" . ,org-todoist-request-type)))
         (url-request-data (encode-coding-string encoded-data 'utf-8)))
-    (url-retrieve org-todoist-sync-endpoint
+    (url-retrieve (org-todoist--sync-endpoint)
                   (lambda (status)
                     (if (plist-get status :error)
                         (progn
@@ -834,6 +842,15 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                                                    "tid")))
   org-todoist-my-id)
 
+(defun org-todoist--id-arg (id &optional command-type)
+  "Return the correct id argument for the current API version.
+For some commands like item_complete and item_delete, v9 API uses 'ids'
+instead of 'id'."
+  (if (and (not org-todoist-use-v1-api)
+           (member command-type '("item_complete" "item_delete")))
+      `("ids" . (,id))
+    `("id" . ,id)))
+
 (defun org-todoist--push (ast old)
   "Create commands necessary to transform syntax tree from `OLD' to `AST'."
   (let ((commands nil))
@@ -999,7 +1016,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                              (if (string= org-todoist-deleted-keyword todo-kw)
                                  (push `(("uuid" . ,(org-id-uuid))
                                          ("type" . "item_delete")
-                                         ("args" . (("id" . ,id))))
+                                         ("args" . (,(org-todoist--id-arg id "item_delete"))))
                                        commands)
                                (if is-todoist-recurring
                                    (push `(("uuid" . ,(org-id-uuid)) ; this doesn't work with org recurring tasks since org auto-reopens with new date. The task will instead be updated with item_update
@@ -1008,13 +1025,13 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                                          commands)
                                  (push `(("uuid" . ,(org-id-uuid))
                                          ("type" . "item_complete")
-                                         ("args" . (("id" . ,id)
+                                         ("args" . (,(org-todoist--id-arg id "item_complete")
                                                     ("date_completed" .
                                                      ,(org-todoist--timestamp-to-utc-str (org-element-property :closed hl))))))
                                        commands)))
                            (push `(("uuid" . ,(org-id-uuid))
                                    ("type" . "item_uncomplete")
-                                   ("args" . (("id" . ,id))))
+                                   ("args" . (,(org-todoist--id-arg id "item_uncomplete"))))
                                  commands))))))
                   ((and (not section) (string= type org-todoist--section-type) (not (string= org-todoist--default-section-name title)))
                    (if (not oldtask)
@@ -1108,7 +1125,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
                      ((string= org-todoist--task-type type)
                       (push `(("uuid" . ,(org-id-uuid))
                               ("type" . "item_delete")
-                              ("args" . (("id" . ,id))))
+                              ("args" . (,(org-todoist--id-arg id "item_delete"))))
                             commands))
                      ((and (string= org-todoist--section-type type) (not (string= id org-todoist--default-id))) ;; Don't delete the default section
                       (push `(("uuid" . ,(org-id-uuid))
