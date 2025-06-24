@@ -1489,9 +1489,17 @@ inactive."
            (let* ((id (assoc-default 'id data))
                   (proj (org-todoist--get-by-id org-todoist--project-type (assoc-default 'project_id data) AST))
                   (section-id (assoc-default 'section_id data))
-                  (section (org-todoist--get-by-id org-todoist--section-type (or section-id org-todoist--default-id)
-                                                   ;; search in project, since the section search will match the default section if there is no section
-                                                   proj))
+                  (section (if section-id
+                              (org-todoist--get-by-id org-todoist--section-type section-id proj)
+                            ;; If no section, ensure default section exists then use it
+                            (or (org-todoist--get-by-id org-todoist--section-type org-todoist--default-id proj)
+                                (let ((default-section
+                                       (org-todoist--create-node
+                                        org-todoist--section-type
+                                        org-todoist--default-section-name
+                                        nil nil proj)))
+                                  (org-todoist--insert-id default-section org-todoist--default-id)
+                                  default-section))))
                   (title (assoc-default 'content data))
                   (description (assoc-default 'description data))
                   (parent-id (assoc-default 'parent_id data))
@@ -1509,9 +1517,12 @@ inactive."
                  ;; If unsectioned and doesn't have a parent task, add to the default section in that project
                  (unless (or section parent-id)
                    (setq section (org-todoist--get-by-id org-todoist--section-type org-todoist--default-id proj)))
-
-                 ;; check if we need to move sections
-                 (unless (or parent-id (cl-equalp (org-todoist--get-section-id-position task) section-id))
+                 
+                 ;; Move to correct section if needed
+                 (unless (or parent-id 
+                             (and section 
+                                  (cl-equalp (org-todoist--get-section-id-position task) 
+                                             (org-todoist--id-or-temp-id section))))
                    (org-element-extract task)
                    (org-element-adopt section task))
 
@@ -1687,22 +1698,38 @@ If created, use `DEFAULT' text."
   "T if `NODE' has `org-todoist--type' `TYPE'."
   (when (equal (org-todoist--get-prop NODE org-todoist--type) TYPE) NODE))
 
+
 (defun org-todoist--update-file (AST)
-  "Replace the org-todoist file with the org representation `AST'.
+  "Update the org-todoist file with changes from `AST'.
+Use diff to only apply changes rather than rewriting the entire file,
+preserving marks and point location.
 
 RETURN a value representing if the buffer was modified."
   (with-current-buffer
       (org-todoist--get-todoist-buffer)
     (save-restriction
       (widen)
-      (let* ((str (org-todoist-org-element-to-string AST))
-             (bss (buffer-substring-no-properties (point-min) (point-max)))
-             (not-modify (string= str bss)))
-        (unless not-modify
-          (erase-buffer)
-          (insert str)
-          (save-buffer))
-        (not not-modify)))))
+      (let* ((new-str (org-todoist-org-element-to-string AST))
+             (current-buf (current-buffer))
+             (current-pos (point))
+             (current-mark (when mark-active (mark)))
+             (inhibit-read-only t)
+             (modified (not (string= new-str (buffer-substring-no-properties (point-min) (point-max))))))
+        (setq td/str new-str)
+        (when modified
+          ;; Create temp buffer with new content
+          (with-temp-buffer
+            (insert new-str)
+            (let ((temp-buf (current-buffer)))
+              (with-current-buffer current-buf
+                ;; Use replace-buffer-contents to preserve marks and positions
+                (replace-buffer-contents temp-buf)
+                ;; Restore point and mark positions
+                (goto-char current-pos)
+                (when current-mark
+                  (set-mark current-mark)))))
+          (save-buffer)
+          t)))))
 
 (defun org-todoist--file-ast ()
   "Parse the AST of the `'org-todoist-file'."
@@ -2073,19 +2100,81 @@ have no need for it.
 
 With single prefix `ARG', do not open the Todoist buffer after sync.
 
-With double prefix `ARG', do not open the Todoist buffer after sync.
+With double prefix `ARG', delete the previous todoist file.
 NOTE this will irreversibly discard all data not stored in Todoist
-\(e.g., time tracking information and ignored sub-trees.\)."
+\(e.g., time tracking information and ignored sub-trees.\).
 
+Local changes that haven't been synced will be preserved during reset."
   (interactive "P")
-  (when (get-buffer org-todoist-file)
-    (kill-buffer org-todoist-file))
-  (when (eql 16 (car ARG))
-    (delete-file (org-todoist-file)))
-  (delete-file (org-todoist--storage-file "PREVIOUS.json"))
-  (delete-file (org-todoist--storage-file org-todoist--sync-token-file))
-  (delete-file (org-todoist--storage-file org-todoist--sync-buffer-file))
-  (org-todoist--do-sync "*" (null ARG)))
+  (if (and (not (eql 16 (car ARG)))
+           (file-exists-p (org-todoist--storage-file org-todoist--sync-buffer-file)))
+      (org-todoist--verify-changes-before-reset ARG)
+    (when (eql 16 (car ARG))
+      (delete-file (org-todoist-file)))
+    (delete-file (org-todoist--storage-file "PREVIOUS.json"))
+    (delete-file (org-todoist--storage-file org-todoist--sync-token-file))
+    (delete-file (org-todoist--storage-file org-todoist--sync-buffer-file))
+    (org-todoist--do-sync "*" (null ARG))))
+
+(defun org-todoist--verify-changes-before-reset (&optional ARG)
+  "Verify changes with user before performing a full sync reset.
+Checks for pending sync commands first, then opens ediff if needed.
+After user confirms, performs an incremental sync first, then full reset."
+  (let* ((current-buf (find-file-noselect (org-todoist-file)))
+         (current-ast (with-current-buffer current-buf (org-element-parse-buffer)))
+         (last-sync-ast (org-todoist--get-last-sync-buffer-ast))
+         (pending-commands (and last-sync-ast 
+                                (org-todoist--push current-ast last-sync-ast)))
+         (ediff-buf (get-buffer-create "*Org-Todoist Reset Verify*"))
+         (proceed nil))
+    
+    ;; Check if there are pending changes first
+    (when pending-commands
+      (with-current-buffer ediff-buf
+        (erase-buffer)
+        (insert (format "You have %d pending changes that would be lost during reset:\n\n" 
+                        (length pending-commands)))
+        (insert "Pending changes will be LOST during reset unless you:\n"
+                "1) Sync them first (recommended), or\n"
+                "2) Merge them manually using ediff\n\n"
+                "Options:\n"
+                "[s] Sync changes first, then reset\n"
+                "[e] Show changes in ediff\n"
+                "[r] Reset anyway (DANGER: lose changes)\n"
+                "[a] Abort reset completely\n")
+        (pop-to-buffer ediff-buf)
+        
+        (let ((response (read-char-choice 
+                         "Select action: (s/e/r/a) " 
+                         '(?s ?e ?r ?a))))
+          (cond ((eq response ?s) ; Sync then reset
+                 (kill-buffer ediff-buf)
+                 (org-todoist-sync t) ; Sync without opening buffer
+                 (setq proceed t))
+                
+                ((eq response ?e) ; Show ediff
+                 (kill-buffer ediff-buf)
+                 (org-todoist-ediff-snapshot)
+                 (setq proceed nil))
+                
+                ((eq response ?r) ; Reset anyway
+                 (kill-buffer ediff-buf)
+                 (setq proceed (y-or-n-p "Really reset and lose all pending changes? ")))
+                
+                (t ; Abort
+                 (kill-buffer ediff-buf)
+                 (message "Reset canceled"))))))
+
+    ;; Proceed with reset if confirmed or no pending changes
+    (when (or (not pending-commands) proceed)
+      (when (get-buffer org-todoist-file)
+        (kill-buffer org-todoist-file))
+      (when (eql 16 (car ARG))
+        (delete-file (org-todoist-file)))
+      (delete-file (org-todoist--storage-file "PREVIOUS.json"))
+      (delete-file (org-todoist--storage-file org-todoist--sync-token-file))
+      (delete-file (org-todoist--storage-file org-todoist--sync-buffer-file))
+      (org-todoist--do-sync "*" (null ARG)))))
 
 (provide 'org-todoist)
 ;;; org-todoist.el ends here
