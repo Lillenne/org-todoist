@@ -28,7 +28,7 @@ An Emacs package for bidirectional incremental sync of [[https://orgmode.org/][O
 ** How it works
 Commands are automatically detected and batched by diffing the current ~org-todoist-file~ with the abstract syntax tree from a snapshot of the previous sync and nodes are updated in place using a single asynchronous request, meaning metadata, such as time tracking information, /is retained/.
 
-Syncing is done using the [[https://developer.todoist.com/sync/v9/#overview][Todoist sync API]], which sends a single request for both pulling and pushing. *Local changes will overwrite remote changes!*
+Syncing is done using the [[https://developer.todoist.com/api/v1/][Todoist sync API]], which sends a single request for both pulling and pushing. *Local changes will overwrite remote changes!*
 
 * Installation
 ** Doom Emacs
@@ -112,18 +112,17 @@ If you'd like to keep other notes or TODOs alongside your projects and not have 
 
 Sample capture templates:
 #+begin_src emacs-lisp
-(setq org-capture-templates `(
-        ;; Capture a TODO directly to the inbox
-         ("i" "Inbox" entry
-         (file+olp ,(org-todoist-file) "Inbox" ,org-todoist--default-section-name)
-         "* TODO %?")
+(nconc org-capture-templates
+       `(("s" "Todoist")
+         ;; Capture a TODO directly to the inbox
+         ("sq" "Inbox" entry (file+olp ,(org-todoist-file) "Inbox" ,org-todoist--default-section-name) "* TODO %?")
+         ("si" "Inbox" entry (file+olp ,(org-todoist-file) "Inbox" ,org-todoist--default-section-name) "* TODO %? %^G %^{EFFORT}p \nSCHEDULED: %^t")
          ;; Capture to a specific project, section, and parent task, creating them if needed.
          ;; Also prompts for tags, effort, task assignment, scheduled, and deadline times
          ;; Projects are determined by projectile if possible, otherwise via an interactive prompt
-        ("p" "Select project, section, and parent task" entry (function org-todoist--find-project-and-section)
-         "* TODO %^{What is the task} %^G %^{EFFORT}p %(org-todoist-assign-task) %(progn (org-schedule nil) nil) %(progn (org-deadline nil) nil)\n%?")
-        ;; Capture a note to an ignored subtree
-        ("n" "Project Notes" entry (function org-todoist-project-notes) "* %?")))
+         ("ss" "Select Project" entry (function org-todoist-find-project-and-section) "* TODO %^{What is the task} %^G %^{EFFORT}p %(org-todoist-assign-task) %(progn (org-schedule nil) nil) %(progn (org-deadline nil) nil)\n%?")
+         ;; Capture a note to an ignored subtree
+         ("sn" "Project Notes" entry (function org-todoist-project-notes) "* %?")))
 #+end_src
 
 ** (Currently) unsupported features
@@ -163,6 +162,9 @@ Org Todoist requires a [[https://todoist.com/help/articles/find-your-api-token-J
 #+end_src
 
 Additionally, Todoist markdown lists use 4 spaces vs the default 2 spaces for org plain lists. This is compenated for by using a file-local variable in the ~org-todoist-file~ header to set ~org-list-indent-offset~ to 2 (2 base + 2 offset = Todoist's 4). However, this means that when accessing the file for the first time, you will be prompted to allow "potentially unsafe" file-local variables. *You must accept this or manually set the value otherwise this may cause sync errors*.
+** Updating from Sync v9 endpoint to the new unified API v1
+1. Migrate your current ~org-todoist-file~ to conform to the new format via ~org-todoist-migrate-to-v1~
+2. Opt in to using the new unified API v1 after migration setting the ~org-todoist-use-v1-api~ variable to ~t~
 ** Optional
 - ~org-todoist-delete-remote-items~ - If non-nil, delete items no longer present in the org todoist buffer after the last sync. *This will also delete tasks refiled or archived to a separate file from Todoist*.
 - ~org-todoist-file~ - The file to use for Todoist tasks.
@@ -180,6 +182,7 @@ For troubleshooting errors, you can use the following variables and methods:
 - ~org-todoist-log-last-request~ - Set to non-nil to log the last outgoing request to the ~org-todoist--last-request~ variable
 - ~org-todoist-log-last-response~ - Set to non-nil to log the last response json to the ~org-todoist-sync-dir~ and alist to ~org-todoist--last-response~. Any
 - ~org-todoist--push-test~ - Returns the detected diff commands.
+- ~org-todoist-ediff-snapshot~ to see changes since the last snapshot
 
 * Why?
 Org mode is an excellent planning and note-taking tool, but struggles in a few areas:
