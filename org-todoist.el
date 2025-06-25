@@ -2048,7 +2048,7 @@ format used by API v1. This should only be run once. It requires
         (lambda (hl)
           (let ((id (org-entry-get hl org-todoist--id-property))
                 (type (org-todoist--get-todoist-type hl t)))
-            (when (and id (not (string= id org-todoist--default-id)))
+            (when (and id (not (string= id org-todoist--default-id)) (string-match-p "^[0-9]+$" id))
               (cond
                ((string= type org-todoist--project-type) (push id projects))
                ((string= type org-todoist--section-type) (push id sections))
