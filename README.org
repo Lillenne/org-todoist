@@ -179,10 +179,12 @@ Additionally, Todoist markdown lists use 4 spaces vs the default 2 spaces for or
 
 ** Troubleshooting
 For troubleshooting errors, you can use the following variables and methods:
+- ~org-todoist-diagnose~ - Shows a pretty org-mode view of the information below
+- ~org-todoist-report-bug~ - Copy the diagnostics view as GitHub flavored markdown and open the url to create a new issue.
 - ~org-todoist-log-last-request~ - Set to non-nil to log the last outgoing request to the ~org-todoist--last-request~ variable
 - ~org-todoist-log-last-response~ - Set to non-nil to log the last response json to the ~org-todoist-sync-dir~ and alist to ~org-todoist--last-response~. Any
 - ~org-todoist--push-test~ - Returns the detected diff commands.
-- ~org-todoist-ediff-snapshot~ to see changes since the last snapshot
+- ~org-todoist-ediff-snapshot~ to see changes since the last snapshot in ediff
 
 * Why?
 Org mode is an excellent planning and note-taking tool, but struggles in a few areas:
@@ -196,7 +198,7 @@ Todoist fills these gaps and, more importantly, my wife uses it.
 There is currently [[https://github.com/abrochard/emacs-todoist][another great integration]] for org-mode and todoist, but it takes a fundamentally different approach (stateless on-demand regeneration using many requests with the [[https://developer.todoist.com/rest/v2/#overview][REST API]] vs stateful syncing with a single request to the [[https://developer.todoist.com/sync/v9/#overview][sync API]] that can be queried by [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly]] on mobile and buffer creation with org.el vs [[https://orgmode.org/worg/dev/org-element-api.html][org-element-api]]).
 
 * Contributing, Issues, and Feature Request
-Feel free to submit an [[https://github.com/Lillenne/org-todoist/issues/new][issue or feature request]]! When submitting issues *please see the [[Troubleshooting][troubleshooting]] section and attach the response json (or at least the error information)*. I'll do my best to address issues timely and evaluate feature additions. I work full time and have two very young (0-3) boys, so if there is a feature you want to add please feel free to submit a PR yourself!
+Feel free to submit an [[https://github.com/Lillenne/org-todoist/issues/new][issue or feature request]]! For issues, please use the inbuilt ~org-todoist-report-bug~ function. When submitting issues *please see the [[Troubleshooting][troubleshooting]] section and attach the response json (or at least the error information)*. I'll do my best to address issues timely and evaluate feature additions. I work full time and have two very young boys, so if there is a feature you want to add please feel free to submit a PR yourself!
 
 ** Todoist API Data
 

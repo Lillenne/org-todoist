@@ -489,6 +489,30 @@ the Todoist project, section, and optionally parent task."
                (apply callback-fn (cons nil callback-args)))) ; Call with nil on error
            (kill-buffer (process-buffer process))))))))
 
+(defun org-todoist-report-bug ()
+  "Report a bug with org-todoist.
+Generates diagnostics, exports to GitHub Flavored Markdown, copies to clipboard,
+and opens the GitHub issue creation page."
+  (interactive)
+  ;; Generate diagnostics
+  (org-todoist-diagnose)
+
+  (save-window-excursion
+  (let ((diag-buffer (get-buffer "*Org-Todoist Diagnostics*"))
+        (org-export-show-temporary-export-buffer t)
+        (gfm-export-fn (if (fboundp 'org-gfm-export-to-markdown)
+                           'org-gfm-export-as-markdown
+                         'org-md-export-as-markdown)))
+        (switch-to-buffer diag-buffer)
+          ;; Export diagnostics to markdown
+          (funcall gfm-export-fn)
+                (clipboard-kill-region (point-min) (point-max))
+                (message "GFM diagnostics copied to clipboard. Please redact any sensitive information and paste into GitHub issue body."))
+        (kill-buffer))
+    
+    ;; Open GitHub issues page
+    (browse-url "https://github.com/Lillenne/org-todoist/issues/new"))
+
 (defun org-todoist-diagnose ()
   "Display diagnostic information in a temporary buffer.
 Includes last request, response, diff, and push information."
