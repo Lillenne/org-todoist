@@ -6,7 +6,7 @@
 ;; Maintainer: Austin Kearns <59812315+Lillenne@users.noreply.github.com>
 ;; Created: September 15, 2024
 ;; Modified: January 25, 2025
-;; Version: 0.0.1
+;; Version: 0.1.1
 ;; Keywords: calendar org todoist
 ;; Homepage: https://github.com/lillenne/org-todoist
 ;; Package-Requires: ((emacs "30.1") (s "1.13") (org "9.7.19") (ts "0.3") (dash "2.19.1"))
@@ -500,20 +500,20 @@ and opens the GitHub issue creation page."
   (org-todoist-diagnose)
 
   (save-window-excursion
-  (let ((diag-buffer (get-buffer "*Org-Todoist Diagnostics*"))
-        (org-export-show-temporary-export-buffer t)
-        (gfm-export-fn (if (fboundp 'org-gfm-export-to-markdown)
-                           'org-gfm-export-as-markdown
-                         'org-md-export-as-markdown)))
-        (switch-to-buffer diag-buffer)
-          ;; Export diagnostics to markdown
-          (funcall gfm-export-fn)
-                (clipboard-kill-region (point-min) (point-max))
-                (message "GFM diagnostics copied to clipboard. Please redact any sensitive information and paste into GitHub issue body."))
-        (kill-buffer))
-    
-    ;; Open GitHub issues page
-    (browse-url "https://github.com/Lillenne/org-todoist/issues/new"))
+    (let ((diag-buffer (get-buffer "*Org-Todoist Diagnostics*"))
+          (org-export-show-temporary-export-buffer t)
+          (gfm-export-fn (if (fboundp 'org-gfm-export-to-markdown)
+                             'org-gfm-export-as-markdown
+                           'org-md-export-as-markdown)))
+      (switch-to-buffer diag-buffer)
+      ;; Export diagnostics to markdown
+      (funcall gfm-export-fn)
+      (clipboard-kill-region (point-min) (point-max))
+      (message "GFM diagnostics copied to clipboard. Please redact any sensitive information and paste into GitHub issue body."))
+    (kill-buffer))
+
+  ;; Open GitHub issues page
+  (browse-url "https://github.com/Lillenne/org-todoist/issues/new"))
 
 (defun org-todoist-diagnose ()
   "Display diagnostic information in a temporary buffer.
@@ -535,10 +535,9 @@ Includes last request, response, diff, and push information."
                              (format "diff -u %s %s" (shell-quote-argument snapshot-file)
                                      (shell-quote-argument current-file))))
                   (has-diff (not (s-blank? diff-str))))
-            (progn
-              (insert "#+BEGIN_SRC diff\n"
-                      diff-str
-                      "\n#+END_SRC"))
+            (insert "#+BEGIN_SRC diff\n"
+                    diff-str
+                    "\n#+END_SRC")
           (insert (if (file-exists-p snapshot-file)
                       "No changes since last sync!"
                     "No snapshot exists - perform a sync first"))))
@@ -556,7 +555,7 @@ Includes last request, response, diff, and push information."
             (insert "\n#+END_SRC"))
         (insert "No pending commands"))
       (insert "\n\n")
-      
+
       ;; Last Request section
       (insert "* Last Request\n")
       (if org-todoist--last-request
@@ -565,7 +564,7 @@ Includes last request, response, diff, and push information."
             (insert (with-temp-buffer
                       (let* ((decoded (url-unhex-string org-todoist--last-request))
                              (params (url-parse-query-string decoded))
-                             (formatted (mapconcat 
+                             (formatted (mapconcat
                                          (lambda (param)
                                            (let* ((key (car param))
                                                   (value (cdr param))
@@ -579,8 +578,8 @@ Includes last request, response, diff, and push information."
                                          params
                                          ",\n")))
                         (insert "{\n" formatted "\n}"))
-                    (json-pretty-print-buffer)
-                    (buffer-string)))
+                      (json-pretty-print-buffer)
+                      (buffer-string)))
             (insert "\n#+END_SRC"))
         (insert "No request recorded"))
       (insert "\n\n")
