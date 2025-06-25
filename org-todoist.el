@@ -775,12 +775,18 @@ the wrong headline!"
   (org-todoist--date-to-todoist (org-todoist--last-recurring-task-completion TASK)))
 
 (defun org-todoist--push-test ()
-  "Return the commands that will be executed on next sync.
-Sets `org-todoist--request-preview' to the wire-encoded request."
-  (let* ((request-data `(("commands" . , (org-todoist--push (org-todoist--file-ast)
-                                                            (org-todoist--get-last-sync-buffer-ast)))))
-         (url-request-data (encode-coding-string (org-todoist--encode request-data) 'utf-8)))
-    (setq org-todoist--request-preview url-request-data)))
+  "Show the commands that will be executed on next sync in a buffer.
+The buffer is named `*todoist-push-test*' and contains the
+pretty-printed JSON commands."
+  (interactive)
+  (let ((commands (org-todoist--push (org-todoist--file-ast)
+                                     (org-todoist--get-last-sync-buffer-ast))))
+    (switch-to-buffer (get-buffer-create "*todoist-push-test*"))
+    (erase-buffer)
+    (insert (json-encode commands))
+    (json-pretty-print-buffer)
+    (goto-char (point-min)))
+  (message "Commands (as JSON) written to *todoist-push-test*"))
 
 (defun org-todoist--timestamp-times-equal (T1 T2)
   "Equality comparison for org timestamp elements `T1' and `T2'."
