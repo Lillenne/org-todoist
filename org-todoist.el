@@ -1321,15 +1321,16 @@ instead of 'id'."
                      (org-element-adopt
                          (org-todoist--get-by-id org-todoist--project-type targetprojid AST)
                        (org-element-extract section))))
-               ;; Otherwise make the section
-               (org-todoist--get-or-create-node
-                (org-todoist--get-by-id org-todoist--project-type targetprojid AST)
-                org-todoist--section-type
-                (assoc-default 'id sect)
-                (assoc-default 'name sect)
-                nil
-                sect
-                org-todoist--section-skip-list))))
+               ;; Otherwise make the section if parent project exists
+               (when-let ((project (org-todoist--get-by-id org-todoist--project-type targetprojid AST)))
+                 (org-todoist--get-or-create-node
+                  project
+                  org-todoist--section-type
+                  (assoc-default 'id sect)
+                  (assoc-default 'name sect)
+                  nil
+                  sect
+                  org-todoist--section-skip-list)))))
   (org-todoist--label-default-sections AST))
 ;; (dolist (proj (org-todoist--project-nodes AST))
 ;;   ;; TODO add default section here? Otherwise might not be added to new projects without manually added default section?
@@ -1501,15 +1502,7 @@ inactive."
                   (section-id (assoc-default 'section_id data))
                   (section (if section-id
                                (org-todoist--get-by-id org-todoist--section-type section-id proj)
-                             ;; If no section, ensure default section exists then use it
-                             (or (org-todoist--get-by-id org-todoist--section-type org-todoist--default-id proj)
-                                 (let ((default-section
-                                        (org-todoist--create-node
-                                         org-todoist--section-type
-                                         org-todoist--default-section-name
-                                         nil nil proj)))
-                                   (org-todoist--insert-id default-section org-todoist--default-id)
-                                   default-section))))
+                             (org-todoist--get-by-id org-todoist--section-type org-todoist--default-id proj)))
                   (title (assoc-default 'content data))
                   (description (assoc-default 'description data))
                   (parent-id (assoc-default 'parent_id data))
