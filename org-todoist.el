@@ -2339,5 +2339,27 @@ Local changes that haven't been synced will be preserved during reset."
       (delete-file (org-todoist-file)))
     (org-todoist--do-reset ARG)))
 
+(require 'transient)
+
+;;;; Transient interface
+;;;###autoload
+(transient-define-prefix org-todoist-dispatch ()
+  "Org-Todoist interactive interface"
+  [["Sync Operations"
+    ("s" "Sync" org-todoist-sync)
+    ("e" "Compare with Ediff" org-todoist-ediff-snapshot)
+    ("r" "Force Full Reset" org-todoist--reset)]
+   ["Items"
+    ("g" "Assign" org-todoist-assign-task)
+    ("u" "Unassign" org-todoist-unassign-task)
+    ("t" "Tag user" org-todoist-tag-user)
+    ("i" "Ignore Subtree" org-todoist-ignore-subtree)
+    ("a" "Add Subproject" org-todoist-add-subproject)]
+   ["Diagnostics"
+    ("d" "Show Diagnostics" org-todoist-diagnose)
+    ("p" "Test Push Commands" org-todoist--push-test)
+    ("b" "Report Bug" org-todoist-report-bug)
+    ("m" "Migrate to V1 API" org-todoist-migrate-to-v1)]])
+
 (provide 'org-todoist)
 ;;; org-todoist.el ends here
