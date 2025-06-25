@@ -474,13 +474,15 @@ the Todoist project, section, and optionally parent task."
      (lambda (process event)
        (when (memq (process-status process) '(exit signal))
          (with-current-buffer (process-buffer process)
-           (let ((exit-code (process-exit-status process)))
+           (let ((exit-code (process-exit-status process))
+                 (headers-end (save-excursion
+                                (goto-char (point-min))
+                                (search-forward "\r\n\r\n" nil t)))) ; Find end of headers
              (if (= exit-code 0)
-                 (let* ((resp-str (buffer-string))
-                        (resp-body (save-match-data
-                                     (when (string-match "^.*?\n\n\\(.*\\)" resp-str)
-                                       (match-string 1 resp-str))))
-                        (response (json-read-from-string (or resp-body resp-str))))
+                 (let* ((resp-body (if headers-end 
+                                       (buffer-substring-no-properties headers-end (point-max))
+                                     (buffer-string)))
+                        (response (json-read-from-string resp-body)))
                    (when org-todoist-log-last-response
                      (org-todoist--set-last-response resp-body)
                      (setq org-todoist--last-response response))
@@ -639,11 +641,9 @@ Please set `org-todoist-use-v1-api' to `t' to continue")))
   (let ((encoded-data (org-todoist--encode request-data)))
     (when org-todoist-log-last-request
       (setq org-todoist--last-request encoded-data))
-    (org-todoist--api-call-url-retrieve encoded-data callback-fn callback-args)
-    ;; (if (executable-find "curl")
-    ;;   (org-todoist--api-call-curl encoded-data callback-fn callback-args)
-    ;; (org-todoist--api-call-url-retrieve encoded-data callback-fn callback-args))
-    ))
+    (if (executable-find "curl")
+        (org-todoist--api-call-curl encoded-data callback-fn callback-args)
+      (org-todoist--api-call-url-retrieve encoded-data callback-fn callback-args))))
 
 (defun org-todoist--do-sync (TOKEN OPEN)
   "Diff the Todoist org file, perform the API request, and update the file.
