@@ -2034,6 +2034,31 @@ After user confirms, performs an incremental sync first, then full reset."
 
 ;; User functions
 
+(defun org-todoist-show-assignee ()
+  "Display assigned collaborator's name as an overlay next to task at point."
+  (interactive)
+  (unless (string= (buffer-file-name) (org-todoist-file))
+    (user-error "This command only works in the org-todoist buffer"))
+  (let* ((uid (org-entry-get nil "responsible_uid"))
+         (collaborator (when uid (org-todoist--get-by-id org-todoist--collaborator-type uid (org-todoist--file-ast))))
+         (name (when collaborator (org-element-property :raw-value collaborator)))
+         (pos (save-excursion 
+                (goto-char (org-entry-beginning-position))
+                (search-forward " " (line-end-position) t 3) ; Skip past TODO state and priority
+                (point)))
+         (ov (make-overlay pos pos)))
+    (when name
+      (overlay-put ov 'after-string (propertize (concat "[" name "] ") 'face 'shadow))
+      (overlay-put ov 'org-todoist-assignee-overlay t)
+      (add-hook 'before-change-functions (lambda (&rest _) (delete-overlay ov)) nil t))))
+
+(defun org-todoist-show-all-assignees ()
+  "Display assigned collaborators for all tasks in the current buffer."
+  (interactive)
+  (unless (string= (buffer-file-name) (org-todoist-file))
+    (user-error "This command only works in the org-todoist buffer"))
+  (org-map-entries #'org-todoist-show-assignee))
+
 ;;;###autoload
 (defun org-todoist-report-bug ()
   "Report a bug with org-todoist.
@@ -2351,6 +2376,7 @@ Local changes that haven't been synced will be preserved during reset."
     ("r" "Force Full Reset" org-todoist--reset)]
    ["Items"
     ("g" "Assign" org-todoist-assign-task)
+    ("G" "Show assignees" org-todoist-show-all-assignees)
     ("u" "Unassign" org-todoist-unassign-task)
     ("t" "Tag user" org-todoist-tag-user)
     ("i" "Ignore Subtree" org-todoist-ignore-subtree)
