@@ -496,7 +496,7 @@ the Todoist project, section, and optionally parent task."
   (let ((url-request-method org-todoist-http-method)
         (url-request-extra-headers `(("Authorization" . ,(concat "Bearer " org-todoist-api-token))
                                      ("Content-Type" . ,org-todoist-request-type)))
-        (url-request-data (encode-coding-string encoded-data 'utf-8)))
+        (url-request-data encoded-data))
     (url-retrieve (org-todoist--sync-endpoint)
                   (lambda (status)
                     (if (plist-get status :error)
