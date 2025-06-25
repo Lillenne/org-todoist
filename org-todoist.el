@@ -489,6 +489,93 @@ the Todoist project, section, and optionally parent task."
                (apply callback-fn (cons nil callback-args)))) ; Call with nil on error
            (kill-buffer (process-buffer process))))))))
 
+(defun org-todoist-diagnose ()
+  "Display diagnostic information in a temporary buffer.
+Includes last request, response, diff, and push information."
+  (interactive)
+  (let ((buf (get-buffer-create "*Org-Todoist Diagnostics*"))
+        (inhibit-read-only t))
+    (with-current-buffer buf
+      (view-mode -1)
+      (erase-buffer)
+      (org-mode)
+
+      ;; Unified Diff section
+      (insert "* Unified Diff vs Last Snapshot\n")
+      (let ((current-file (org-todoist-file))
+            (snapshot-file (org-todoist--storage-file org-todoist--sync-buffer-file)))
+        (if-let* ((exists (file-exists-p snapshot-file))
+                  (diff-str (shell-command-to-string
+                             (format "diff -u %s %s" (shell-quote-argument snapshot-file)
+                                     (shell-quote-argument current-file))))
+                  (has-diff (not (s-blank? diff-str))))
+            (progn
+              (insert "#+BEGIN_SRC diff\n"
+                      diff-str
+                      "\n#+END_SRC"))
+          (insert (if (file-exists-p snapshot-file)
+                      "No changes since last sync!"
+                    "No snapshot exists - perform a sync first"))))
+      (insert "\n\n")
+
+      ;; Push Test section
+      (insert "* Pending Commands (Push Test)\n")
+      (if-let ((org-todoist--request-preview (org-todoist--generate-push-preview)))
+          (progn
+            (insert "#+BEGIN_SRC json\n")
+            (insert (with-temp-buffer
+                      (insert (json-encode org-todoist--request-preview))
+                      (json-pretty-print-buffer)
+                      (buffer-string)))
+            (insert "\n#+END_SRC"))
+        (insert "No pending commands"))
+      (insert "\n\n")
+      
+      ;; Last Request section
+      (insert "* Last Request\n")
+      (if org-todoist--last-request
+          (progn
+            (insert "#+BEGIN_SRC json\n")
+            (insert (with-temp-buffer
+                      (let* ((decoded (url-unhex-string org-todoist--last-request))
+                             (params (url-parse-query-string decoded))
+                             (formatted (mapconcat 
+                                         (lambda (param)
+                                           (let* ((key (car param))
+                                                  (value (cdr param))
+                                                  (parsed-value (cond
+                                                                 ((member key '("resource_types" "commands"))
+                                                                  (json-read-from-string (car value)))
+                                                                 (t value))))
+
+                                             (concat (json-encode key) ": "
+                                                     (json-encode parsed-value))))
+                                         params
+                                         ",\n")))
+                        (insert "{\n" formatted "\n}"))
+                    (json-pretty-print-buffer)
+                    (buffer-string)))
+            (insert "\n#+END_SRC"))
+        (insert "No request recorded"))
+      (insert "\n\n")
+
+      ;; Last Response section
+      (insert "* Last Response\n")
+      (if org-todoist--last-response
+          (progn
+            (insert "#+BEGIN_SRC json\n")
+            (insert (with-temp-buffer
+                      (insert (json-encode org-todoist--last-response))
+                      (json-pretty-print-buffer)
+                      (buffer-string)))
+            (insert "\n#+END_SRC"))
+        (insert "No response recorded"))
+
+      (goto-char (point-min))
+      (org-fold-show-all)
+      (view-mode 1)
+      (pop-to-buffer buf))))
+
 (defun org-todoist--api-call-url-retrieve (encoded-data callback-fn callback-args)
   "Make an API call using `url-retrieve'."
   (let ((url-request-method org-todoist-http-method)
@@ -783,13 +870,17 @@ the wrong headline!"
   "Convert the :LAST_REPEAT property of `TASK' to a Todoist object."
   (org-todoist--date-to-todoist (org-todoist--last-recurring-task-completion TASK)))
 
+(defun org-todoist--generate-push-preview ()
+  "Generate the request commands that would be sent given current buffer state."
+  (org-todoist--push (org-todoist--file-ast)
+                     (org-todoist--get-last-sync-buffer-ast)))
+
 (defun org-todoist--push-test ()
   "Show the commands that will be executed on next sync in a buffer.
 The buffer is named `*todoist-push-test*' and contains the
 pretty-printed JSON commands."
   (interactive)
-  (let ((commands (org-todoist--push (org-todoist--file-ast)
-                                     (org-todoist--get-last-sync-buffer-ast))))
+  (let ((commands (org-todoist--generate-push-preview)))
     (switch-to-buffer (get-buffer-create "*todoist-push-test*"))
     (erase-buffer)
     (insert (json-encode commands))
