@@ -519,6 +519,12 @@ the Todoist project, section, and optionally parent task."
 `callback-fn' is a function to call with the JSON response.
 `callback-args' are additional arguments for the callback.
 Uses `curl' if available, otherwise falls back to `url-retrieve'."
+  (unless org-todoist-use-v1-api
+    (if (file-exists-p (org-todoist-file))
+        (user-error "Org-todoist has recently upgraded to the unified API v1!
+Please run `org-todoist-migrate-to-v1' and set `org-todoist-use-v1-api' to `t' to continue")
+      (user-error "Org-todoist has recently upgraded to the unified API v1!
+Please set `org-todoist-use-v1-api' to `t' to continue")))
   (let ((encoded-data (org-todoist--encode request-data)))
     (when org-todoist-log-last-request
       (setq org-todoist--last-request encoded-data))
