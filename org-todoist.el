@@ -178,19 +178,10 @@ this directory must be accessible on all PCs running the sync command.")
 
                                         ;Debug data;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defvar org-todoist--sync-err nil "The error from the last sync, if any.")
-(defvar org-todoist-log-last-request t)
-(defvar org-todoist--last-request nil "The last request body, if any and `org-todoist-log-last-request' is non-nil.")
-(defvar org-todoist-log-last-response t)
-(defvar org-todoist--last-response nil "The last parsed response, if any and `org-todoist-log-last-response' is non-nil.")
 (defvar org-todoist-keep-old-sync-tokens nil)
 (defvar org-todoist--request-preview nil
   "What the commands section of the next request will be.
 Set by `org-todoist--push-test'")
-
-(defun org-todoist--set-last-response (JSON)
-  "Store the last Todoist response `JSON' to a file."
-  (with-temp-file (org-todoist--storage-file "PREVIOUS.json")
-    (insert JSON)))
 
                                         ;Hooks;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--item-close-hook ()
@@ -483,123 +474,11 @@ the Todoist project, section, and optionally parent task."
                                        (buffer-substring-no-properties headers-end (point-max))
                                      (buffer-string)))
                         (response (json-read-from-string resp-body)))
-                   (when org-todoist-log-last-response
-                     (org-todoist--set-last-response resp-body)
-                     (setq org-todoist--last-response response))
+                   (setq org-todoist--last-response response)
                    (apply callback-fn (cons response callback-args)))
                (setq org-todoist--sync-err (format "curl exited with code %d: %s" exit-code (buffer-string)))
                (apply callback-fn (cons nil callback-args)))) ; Call with nil on error
            (kill-buffer (process-buffer process))))))))
-
-(defun org-todoist-report-bug ()
-  "Report a bug with org-todoist.
-Generates diagnostics, exports to GitHub Flavored Markdown, copies to clipboard,
-and opens the GitHub issue creation page."
-  (interactive)
-  ;; Generate diagnostics
-  (org-todoist-diagnose)
-
-  (save-window-excursion
-    (let ((diag-buffer (get-buffer "*Org-Todoist Diagnostics*"))
-          (org-export-show-temporary-export-buffer t)
-          (gfm-export-fn (if (fboundp 'org-gfm-export-to-markdown)
-                             'org-gfm-export-as-markdown
-                           'org-md-export-as-markdown)))
-      (switch-to-buffer diag-buffer)
-      ;; Export diagnostics to markdown
-      (funcall gfm-export-fn)
-      (clipboard-kill-region (point-min) (point-max))
-      (message "GFM diagnostics copied to clipboard. Please redact any sensitive information and paste into GitHub issue body."))
-    (kill-buffer))
-
-  ;; Open GitHub issues page
-  (browse-url "https://github.com/Lillenne/org-todoist/issues/new"))
-
-(defun org-todoist-diagnose ()
-  "Display diagnostic information in a temporary buffer.
-Includes last request, response, diff, and push information."
-  (interactive)
-  (let ((buf (get-buffer-create "*Org-Todoist Diagnostics*"))
-        (inhibit-read-only t))
-    (with-current-buffer buf
-      (view-mode -1)
-      (erase-buffer)
-      (org-mode)
-
-      ;; Unified Diff section
-      (insert "* Unified Diff vs Last Snapshot\n")
-      (let ((current-file (org-todoist-file))
-            (snapshot-file (org-todoist--storage-file org-todoist--sync-buffer-file)))
-        (if-let* ((exists (file-exists-p snapshot-file))
-                  (diff-str (shell-command-to-string
-                             (format "diff -u %s %s" (shell-quote-argument snapshot-file)
-                                     (shell-quote-argument current-file))))
-                  (has-diff (not (s-blank? diff-str))))
-            (insert "#+BEGIN_SRC diff\n"
-                    diff-str
-                    "\n#+END_SRC")
-          (insert (if (file-exists-p snapshot-file)
-                      "No changes since last sync!"
-                    "No snapshot exists - perform a sync first"))))
-      (insert "\n\n")
-
-      ;; Push Test section
-      (insert "* Pending Commands (Push Test)\n")
-      (if-let ((org-todoist--request-preview (org-todoist--generate-push-preview)))
-          (progn
-            (insert "#+BEGIN_SRC json\n")
-            (insert (with-temp-buffer
-                      (insert (json-encode org-todoist--request-preview))
-                      (json-pretty-print-buffer)
-                      (buffer-string)))
-            (insert "\n#+END_SRC"))
-        (insert "No pending commands"))
-      (insert "\n\n")
-
-      ;; Last Request section
-      (insert "* Last Request\n")
-      (if org-todoist--last-request
-          (progn
-            (insert "#+BEGIN_SRC json\n")
-            (insert (with-temp-buffer
-                      (let* ((decoded (url-unhex-string org-todoist--last-request))
-                             (params (url-parse-query-string decoded))
-                             (formatted (mapconcat
-                                         (lambda (param)
-                                           (let* ((key (car param))
-                                                  (value (cdr param))
-                                                  (parsed-value (cond
-                                                                 ((member key '("resource_types" "commands"))
-                                                                  (json-read-from-string (car value)))
-                                                                 (t value))))
-
-                                             (concat (json-encode key) ": "
-                                                     (json-encode parsed-value))))
-                                         params
-                                         ",\n")))
-                        (insert "{\n" formatted "\n}"))
-                      (json-pretty-print-buffer)
-                      (buffer-string)))
-            (insert "\n#+END_SRC"))
-        (insert "No request recorded"))
-      (insert "\n\n")
-
-      ;; Last Response section
-      (insert "* Last Response\n")
-      (if org-todoist--last-response
-          (progn
-            (insert "#+BEGIN_SRC json\n")
-            (insert (with-temp-buffer
-                      (insert (json-encode org-todoist--last-response))
-                      (json-pretty-print-buffer)
-                      (buffer-string)))
-            (insert "\n#+END_SRC"))
-        (insert "No response recorded"))
-
-      (goto-char (point-min))
-      (org-fold-show-all)
-      (view-mode 1)
-      (pop-to-buffer buf))))
 
 (defun org-todoist--api-call-url-retrieve (encoded-data callback-fn callback-args)
   "Make an API call using `url-retrieve'."
@@ -617,9 +496,7 @@ Includes last request, response, diff, and push information."
                         (goto-char url-http-end-of-headers)
                         (let* ((resp-str (decode-coding-region (point) (point-max) 'utf-8 t))
                                (response (json-read-from-string resp-str)))
-                          (when org-todoist-log-last-response
-                            (org-todoist--set-last-response resp-str)
-                            (setq org-todoist--last-response response))
+                          (setq org-todoist--last-response response)
                           (apply callback-fn (cons response callback-args))))))
                   nil
                   'silent
@@ -638,8 +515,7 @@ Please run `org-todoist-migrate-to-v1' and set `org-todoist-use-v1-api' to `t' t
       (user-error "Org-todoist has recently upgraded to the unified API v1!
 Please set `org-todoist-use-v1-api' to `t' to continue")))
   (let ((encoded-data (org-todoist--encode request-data)))
-    (when org-todoist-log-last-request
-      (setq org-todoist--last-request encoded-data))
+    (setq org-todoist--last-request encoded-data)
     (if (executable-find "curl")
         (org-todoist--api-call-curl encoded-data callback-fn callback-args)
       (org-todoist--api-call-url-retrieve encoded-data callback-fn callback-args))))
@@ -2089,7 +1965,178 @@ Note, a \n character is appended if not present."
   "Check if IDs appear to be in v2 UUID format."
   (not (org-todoist--is-v1)))
 
+(defun org-todoist--do-reset (ARG)
+  "Sync with a full reset token.
+`ARG' is passed to `org-todoist--do-sync'."
+  (org-todoist--do-sync "*" (null ARG)))
+
+(defun org-todoist--verify-changes-before-reset (&optional ARG)
+  "Verify changes with user before performing a full sync reset.
+Checks for pending sync commands first, then opens ediff if needed.
+After user confirms, performs an incremental sync first, then full reset."
+  (let* ((current-buf (find-file-noselect (org-todoist-file)))
+         (current-ast (with-current-buffer current-buf (org-element-parse-buffer)))
+         (last-sync-ast (org-todoist--get-last-sync-buffer-ast))
+         (pending-commands (and last-sync-ast
+                                (org-todoist--push current-ast last-sync-ast)))
+         (ediff-buf (get-buffer-create "*Org-Todoist Reset Verify*"))
+         (proceed nil))
+
+    ;; Check if there are pending changes first
+    (when pending-commands
+      (with-current-buffer ediff-buf
+        (erase-buffer)
+        (insert (format "You have %d pending changes that would be lost during reset:\n\n"
+                        (length pending-commands)))
+        (insert "Pending changes may be LOST during reset unless you:\n"
+                "1) Sync them first (recommended), or\n"
+                "2) Merge them manually using ediff\n\n"
+                "Options:\n"
+                "[s] Sync changes first, then reset\n"
+                "[e] Show changes in ediff\n"
+                "[r] Reset anyway (DANGER: lose changes)\n"
+                "[a] Abort reset completely\n")
+        (pop-to-buffer ediff-buf)
+
+        (let ((response (read-char-choice
+                         "Select action: (s/e/r/a) "
+                         '(?s ?e ?r ?a))))
+          (cond ((eq response ?s) ; Sync then reset
+                 (kill-buffer ediff-buf)
+                 (org-todoist-sync t) ; Sync without opening buffer
+                 (setq proceed t))
+
+                ((eq response ?e) ; Show ediff
+                 (kill-buffer ediff-buf)
+                 (org-todoist-ediff-snapshot)
+                 (setq proceed nil))
+
+                ((eq response ?r) ; Reset anyway
+                 (kill-buffer ediff-buf)
+                 (setq proceed (y-or-n-p "Really reset and lose all pending changes? ")))
+
+                (t ; Abort
+                 (kill-buffer ediff-buf)
+                 (message "Reset canceled"))))))
+
+    ;; Proceed with reset if confirmed or no pending changes
+    (when (or (not pending-commands) proceed)
+      (message "Resetting...")
+      (org-todoist--do-reset ARG))))
+
 ;; User functions
+
+;;;###autoload
+(defun org-todoist-report-bug ()
+  "Report a bug with org-todoist.
+Generates diagnostics, exports to GitHub Flavored Markdown, copies to clipboard,
+and opens the GitHub issue creation page."
+  (interactive)
+  ;; Generate diagnostics
+  (org-todoist-diagnose)
+
+  (save-window-excursion
+    (let ((diag-buffer (get-buffer "*Org-Todoist Diagnostics*"))
+          (org-export-show-temporary-export-buffer t)
+          (gfm-export-fn (if (fboundp 'org-gfm-export-to-markdown)
+                             'org-gfm-export-as-markdown
+                           'org-md-export-as-markdown)))
+      (switch-to-buffer diag-buffer)
+      ;; Export diagnostics to markdown
+      (funcall gfm-export-fn)
+      (clipboard-kill-region (point-min) (point-max))
+      (message "GFM diagnostics copied to clipboard. Please redact any sensitive information and paste into GitHub issue body."))
+    (kill-buffer))
+
+  ;; Open GitHub issues page
+  (browse-url "https://github.com/Lillenne/org-todoist/issues/new"))
+
+;;;###autoload
+(defun org-todoist-diagnose ()
+  "Display diagnostic information in a temporary buffer.
+Includes last request, response, diff, and push information."
+  (interactive)
+  (let ((buf (get-buffer-create "*Org-Todoist Diagnostics*"))
+        (inhibit-read-only t))
+    (with-current-buffer buf
+      (view-mode -1)
+      (erase-buffer)
+      (org-mode)
+
+      ;; Unified Diff section
+      (insert "* Unified Diff vs Last Snapshot\n")
+      (let ((current-file (org-todoist-file))
+            (snapshot-file (org-todoist--storage-file org-todoist--sync-buffer-file)))
+        (if-let* ((exists (file-exists-p snapshot-file))
+                  (diff-str (shell-command-to-string
+                             (format "diff -u %s %s" (shell-quote-argument snapshot-file)
+                                     (shell-quote-argument current-file))))
+                  (has-diff (not (s-blank? diff-str))))
+            (insert "#+BEGIN_SRC diff\n"
+                    diff-str
+                    "\n#+END_SRC")
+          (insert (if (file-exists-p snapshot-file)
+                      "No changes since last sync!"
+                    "No snapshot exists - perform a sync first"))))
+      (insert "\n\n")
+
+      ;; Push Test section
+      (insert "* Pending Commands (Push Test)\n")
+      (if-let ((org-todoist--request-preview (org-todoist--generate-push-preview)))
+          (progn
+            (insert "#+BEGIN_SRC json\n")
+            (insert (with-temp-buffer
+                      (insert (json-encode org-todoist--request-preview))
+                      (json-pretty-print-buffer)
+                      (buffer-string)))
+            (insert "\n#+END_SRC"))
+        (insert "No pending commands"))
+      (insert "\n\n")
+
+      ;; Last Request section
+      (insert "* Last Request\n")
+      (if org-todoist--last-request
+          (progn
+            (insert "#+BEGIN_SRC json\n")
+            (insert (with-temp-buffer
+                      (let* ((decoded (url-unhex-string org-todoist--last-request))
+                             (params (url-parse-query-string decoded))
+                             (formatted (mapconcat
+                                         (lambda (param)
+                                           (let* ((key (car param))
+                                                  (value (cdr param))
+                                                  (parsed-value (cond
+                                                                 ((member key '("resource_types" "commands"))
+                                                                  (json-read-from-string (car value)))
+                                                                 (t value))))
+
+                                             (concat (json-encode key) ": "
+                                                     (json-encode parsed-value))))
+                                         params
+                                         ",\n")))
+                        (insert "{\n" formatted "\n}"))
+                      (json-pretty-print-buffer)
+                      (buffer-string)))
+            (insert "\n#+END_SRC"))
+        (insert "No request recorded"))
+      (insert "\n\n")
+
+      ;; Last Response section
+      (insert "* Last Response\n")
+      (if org-todoist--last-response
+          (progn
+            (insert "#+BEGIN_SRC json\n")
+            (insert (with-temp-buffer
+                      (insert (json-encode org-todoist--last-response))
+                      (json-pretty-print-buffer)
+                      (buffer-string)))
+            (insert "\n#+END_SRC"))
+        (insert "No response recorded"))
+
+      (goto-char (point-min))
+      (org-fold-show-all)
+      (view-mode 1)
+      (pop-to-buffer buf))))
 
 ;;;###autoload
 (defun org-todoist-background-sync ()
@@ -2247,6 +2294,7 @@ With `ARG', do not open the Todoist buffer after sync."
   (interactive "P")
   (org-todoist--do-sync (org-todoist--get-sync-token) (null ARG)))
 
+;;;###autoload
 (defun org-todoist--reset (&optional ARG)
   "Perform a full sync from Todoist.
 
@@ -2266,70 +2314,7 @@ Local changes that haven't been synced will be preserved during reset."
       (org-todoist--verify-changes-before-reset ARG)
     (when (eql 16 (car ARG))
       (delete-file (org-todoist-file)))
-    (delete-file (org-todoist--storage-file "PREVIOUS.json"))
-    (delete-file (org-todoist--storage-file org-todoist--sync-token-file))
-    (delete-file (org-todoist--storage-file org-todoist--sync-buffer-file))
-    (org-todoist--do-sync "*" (null ARG))))
-
-(defun org-todoist--verify-changes-before-reset (&optional ARG)
-  "Verify changes with user before performing a full sync reset.
-Checks for pending sync commands first, then opens ediff if needed.
-After user confirms, performs an incremental sync first, then full reset."
-  (let* ((current-buf (find-file-noselect (org-todoist-file)))
-         (current-ast (with-current-buffer current-buf (org-element-parse-buffer)))
-         (last-sync-ast (org-todoist--get-last-sync-buffer-ast))
-         (pending-commands (and last-sync-ast
-                                (org-todoist--push current-ast last-sync-ast)))
-         (ediff-buf (get-buffer-create "*Org-Todoist Reset Verify*"))
-         (proceed nil))
-
-    ;; Check if there are pending changes first
-    (when pending-commands
-      (with-current-buffer ediff-buf
-        (erase-buffer)
-        (insert (format "You have %d pending changes that would be lost during reset:\n\n"
-                        (length pending-commands)))
-        (insert "Pending changes will be LOST during reset unless you:\n"
-                "1) Sync them first (recommended), or\n"
-                "2) Merge them manually using ediff\n\n"
-                "Options:\n"
-                "[s] Sync changes first, then reset\n"
-                "[e] Show changes in ediff\n"
-                "[r] Reset anyway (DANGER: lose changes)\n"
-                "[a] Abort reset completely\n")
-        (pop-to-buffer ediff-buf)
-
-        (let ((response (read-char-choice
-                         "Select action: (s/e/r/a) "
-                         '(?s ?e ?r ?a))))
-          (cond ((eq response ?s) ; Sync then reset
-                 (kill-buffer ediff-buf)
-                 (org-todoist-sync t) ; Sync without opening buffer
-                 (setq proceed t))
-
-                ((eq response ?e) ; Show ediff
-                 (kill-buffer ediff-buf)
-                 (org-todoist-ediff-snapshot)
-                 (setq proceed nil))
-
-                ((eq response ?r) ; Reset anyway
-                 (kill-buffer ediff-buf)
-                 (setq proceed (y-or-n-p "Really reset and lose all pending changes? ")))
-
-                (t ; Abort
-                 (kill-buffer ediff-buf)
-                 (message "Reset canceled"))))))
-
-    ;; Proceed with reset if confirmed or no pending changes
-    (when (or (not pending-commands) proceed)
-      (when (get-buffer org-todoist-file)
-        (kill-buffer org-todoist-file))
-      (when (eql 16 (car ARG))
-        (delete-file (org-todoist-file)))
-      (delete-file (org-todoist--storage-file "PREVIOUS.json"))
-      (delete-file (org-todoist--storage-file org-todoist--sync-token-file))
-      (delete-file (org-todoist--storage-file org-todoist--sync-buffer-file))
-      (org-todoist--do-sync "*" (null ARG)))))
+    (org-todoist--do-reset ARG)))
 
 (provide 'org-todoist)
 ;;; org-todoist.el ends here
