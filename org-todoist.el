@@ -100,19 +100,17 @@ Set this if your todoist full_name differs from symbol `user-full-name'.
 The correct value can be found in the variable `org-todoist-file' under
 Todoist Metadata > Collaborators > <your-name> as the property \"tid\".")
 
-(defvar org-todoist-show-n-levels -1
+(defvar org-todoist-show-n-levels nil
   "The number of headline levels to show by default.
 If visiting the todoist buffer when sync is called, it will attempt to
 respect the visibility of the item at pos.
+nil=do not adjust folds
 2=projects,
 3=sections,
 4=root tasks,
 5=root tasks + 1 level of subtasks
-<0 no fold")
-
-(defvar org-todoist-show-special nil
-  "Symbol for how to display the todoist buffer after sync.
-`'todo-tree' for `org-show-todo-tree'.")
+`no-fold' always fully expand everything except property drawers
+`todo-tree' automatically apply `org-show-todo-tree'.")
 
 (defvar org-todoist-todo-keyword "TODO" "TODO keyword for active Todoist tasks.")
 
@@ -538,9 +536,6 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
     (user-error "No org-todoist-api-token API token set"))
   (setq org-todoist--sync-err nil)
   (let* ((cur-marker (point-marker))
-         (cur-headline (when (equal (buffer-file-name) (org-todoist-file))
-                         (org-entry-get (marker-position cur-marker) "ITEM")))
-         (show-n-levels (when cur-headline (org-todoist--get-hl-level-at-point)))
          (ast (org-todoist--file-ast))
          (request-data `(("sync_token" . ,TOKEN)
                          ("resource_types" . ,(json-encode org-todoist-resource-types))
@@ -553,28 +548,27 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
     (message (if OPEN "Syncing with todoist. Buffer will open when sync is complete..." "Syncing with todoist. This may take a moment..."))
     (org-todoist--api-call
      request-data
-     (lambda (response open ast cur-marker show-n-levels)
+     (lambda (response open ast cur-marker)
        (when (and (equal TOKEN "*")
                   (eq (assoc-default 'full_sync response) :json-false))
          (setq org-todoist--sync-err "Full sync failed - Todoist returned full_sync=false")
          (error org-todoist--sync-err))
        (if open
-           (progn (org-todoist--do-sync-callback response ast cur-marker show-n-levels)
+           (progn (org-todoist--do-sync-callback response ast cur-marker)
                   (find-file (org-todoist-file)))
-         (save-current-buffer (org-todoist--do-sync-callback response ast cur-marker show-n-levels))))
-     `(,OPEN ,ast ,cur-marker ,show-n-levels))))
+         (save-current-buffer (org-todoist--do-sync-callback response ast cur-marker))))
+     `(,OPEN ,ast ,cur-marker))))
 
-(defun org-todoist--do-sync-callback (response ast cur-marker show-n-levels)
+(defun org-todoist--do-sync-callback (response ast cur-marker)
   "The callback to invoke after syncing with the Todoist API.
 
 `response' is the parsed JSON response from the API.
 `AST' is the current abstract syntax tree of the local Todoist buffer.
-`CUR-MARKER' is the marker at point when the sync was invoked.
-`SHOW-N-LEVELS' is the number of levels of the org document to show."
+`CUR-MARKER' is the marker at point when the sync was invoked."
   (if (null response)
       (message "Sync failed. See org-todoist--sync-err for details.")
     (when (org-todoist--parse-response response ast)
-      (org-todoist--handle-display cur-marker show-n-levels))
+      (org-todoist--handle-display cur-marker))
     (message "Sync complete.")))
 
 (defun org-todoist--get-todoist-buffer ()
@@ -585,20 +579,29 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
         fb
       (find-file-noselect file))))
 
-(defun org-todoist--handle-display (cur-marker show-n-levels)
+(defun org-todoist--handle-display (cur-marker)
   "Handle saving and folding of the Todoist buffer.
 
-`CUR-MARKER' is the marker prior to the sync call.
-`SHOW-N-LEVELS' is the number of outline levels to show."
+`CUR-MARKER' is the marker prior to the sync call."
   (with-current-buffer (org-todoist--get-todoist-buffer)
-    (unless show-n-levels (setq show-n-levels org-todoist-show-n-levels))
-    (if (< show-n-levels 1)
-        (org-content)
-      (org-content show-n-levels))
-    (org-fold-hide-drawer-all)
-    (write-file (org-todoist-file))
-    (when (eq 'todo-tree org-todoist-show-special) (org-show-todo-tree nil)))
-  (goto-char cur-marker))
+    (cond
+     ((null org-todoist-show-n-levels)   ; do nothing
+      nil)
+     ((eq 'todo-tree org-todoist-show-n-levels)
+      (org-show-todo-tree nil))
+     ((eq org-todoist-show-n-levels 'no-fold)
+      (org-fold-show-all))        ; show everything (headings and text)
+     ((integerp org-todoist-show-n-levels)
+      (if (< org-todoist-show-n-levels 1)
+          (org-content 1)   ; top-level only
+        (org-content org-todoist-show-n-levels))))
+    (when (equal (marker-buffer cur-marker) (org-todoist--get-todoist-buffer))
+      (goto-char cur-marker)
+      (org-reveal)
+      (org-fold-show-siblings)
+      (org-fold-show-children))
+    (org-fold-hide-drawer-all)   ; always hide drawers
+    (write-file (org-todoist-file))))
 
 (defun org-todoist--first-parent-of-type (NODE TYPES)
   "Gets the first parent of `NODE' which is one of the given `TYPES'.
