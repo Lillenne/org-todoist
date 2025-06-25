@@ -1520,11 +1520,11 @@ inactive."
                  ;; If unsectioned and doesn't have a parent task, add to the default section in that project
                  (unless (or section parent-id)
                    (setq section (org-todoist--get-by-id org-todoist--section-type org-todoist--default-id proj)))
-                 
+
                  ;; Move to correct section if needed
-                 (unless (or parent-id 
-                             (and section 
-                                  (cl-equalp (org-todoist--get-section-id-position task) 
+                 (unless (or parent-id
+                             (and section
+                                  (cl-equalp (org-todoist--get-section-id-position task)
                                              (org-todoist--id-or-temp-id section))))
                    (org-element-extract task)
                    (org-element-adopt section task))
@@ -1587,7 +1587,7 @@ appropriate symbol representation."
                                              (or (not TYPE)
                                                  (string= (org-todoist--get-todoist-type hl) TYPE)))
                                     hl))))
-         (sorted (cl-sort children (lambda (a b) 
+         (sorted (cl-sort children (lambda (a b)
                                      (< (org-todoist--get-position a PROPERTY)
                                         (org-todoist--get-position b PROPERTY))))))
     (dolist (child children)
@@ -1956,7 +1956,7 @@ Note, a \n character is appended if not present."
       (lambda (hl)
         (when-let* ((id (org-todoist--get-prop hl org-todoist--id-property))
                     (id-num (string-to-number id)))
-          (unless (or (zerop id-num) 
+          (unless (or (zerop id-num)
                       (string= id org-todoist--default-id))
             (throw 'found t))))
       nil t)
@@ -1991,7 +1991,7 @@ Done by settings the `org-todoist-type' propety of the headline at point
 to the `org-todoist--ignored-node-type'."
   (interactive)
   (if (org-entry-get nil org-todoist--type)
-      (message "Can't ignore subtrees that are already tracked by Todoist!")
+      (user-error "Can't ignore subtrees that are already tracked by Todoist!")
     (org-set-property org-todoist--type org-todoist--ignored-node-type)))
 
 ;;;###autoload
@@ -2001,7 +2001,7 @@ to the `org-todoist--ignored-node-type'."
   (interactive "P")
   (let ((type (org-entry-get nil org-todoist--type)))
     (if (and type (not (string= type org-todoist--project-type))) ; if there is no type, assume it is probably a new project.
-        (message "Can only add subproject to project headlines!")
+        (user-error "Can only add subproject to project headlines!")
       (org-insert-subheading ARG)
       (org-set-property org-todoist--type org-todoist--project-type))))
 
@@ -2102,9 +2102,9 @@ You MUST set org-todoist-use-v1-api to 't' to continue using org-todoist without
   "Compare current org-todoist file with last synced snapshot using ediff."
   (interactive)
   (cond ((not (file-exists-p (org-todoist-file)))
-         (message "No org-todoist-file exists - perform a sync first to create one"))
+         (user-error "No org-todoist-file exists - perform a sync first to create one"))
         ((not (file-exists-p (org-todoist--storage-file org-todoist--sync-buffer-file)))
-         (message "No snapshot exists - perform a sync first to create one"))
+         (user-error "No snapshot exists - perform a sync first to create one"))
         (t (let ((current-buf (find-file-noselect (org-todoist-file)))
                  (snapshot-file (org-todoist--storage-file org-todoist--sync-buffer-file)))
              (ediff-buffers (find-file-noselect snapshot-file)
@@ -2155,16 +2155,16 @@ After user confirms, performs an incremental sync first, then full reset."
   (let* ((current-buf (find-file-noselect (org-todoist-file)))
          (current-ast (with-current-buffer current-buf (org-element-parse-buffer)))
          (last-sync-ast (org-todoist--get-last-sync-buffer-ast))
-         (pending-commands (and last-sync-ast 
+         (pending-commands (and last-sync-ast
                                 (org-todoist--push current-ast last-sync-ast)))
          (ediff-buf (get-buffer-create "*Org-Todoist Reset Verify*"))
          (proceed nil))
-    
+
     ;; Check if there are pending changes first
     (when pending-commands
       (with-current-buffer ediff-buf
         (erase-buffer)
-        (insert (format "You have %d pending changes that would be lost during reset:\n\n" 
+        (insert (format "You have %d pending changes that would be lost during reset:\n\n"
                         (length pending-commands)))
         (insert "Pending changes will be LOST during reset unless you:\n"
                 "1) Sync them first (recommended), or\n"
@@ -2175,24 +2175,24 @@ After user confirms, performs an incremental sync first, then full reset."
                 "[r] Reset anyway (DANGER: lose changes)\n"
                 "[a] Abort reset completely\n")
         (pop-to-buffer ediff-buf)
-        
-        (let ((response (read-char-choice 
-                         "Select action: (s/e/r/a) " 
+
+        (let ((response (read-char-choice
+                         "Select action: (s/e/r/a) "
                          '(?s ?e ?r ?a))))
           (cond ((eq response ?s) ; Sync then reset
                  (kill-buffer ediff-buf)
                  (org-todoist-sync t) ; Sync without opening buffer
                  (setq proceed t))
-                
+
                 ((eq response ?e) ; Show ediff
                  (kill-buffer ediff-buf)
                  (org-todoist-ediff-snapshot)
                  (setq proceed nil))
-                
+
                 ((eq response ?r) ; Reset anyway
                  (kill-buffer ediff-buf)
                  (setq proceed (y-or-n-p "Really reset and lose all pending changes? ")))
-                
+
                 (t ; Abort
                  (kill-buffer ediff-buf)
                  (message "Reset canceled"))))))
