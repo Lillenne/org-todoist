@@ -1948,22 +1948,26 @@ Note, a \n character is appended if not present."
   "Remove spaces from `STRING'."
   (string-replace " " "" STRING))
 
-(defun org-todoist--is-v1 ()
-  "Check if any org-todoist-ids are numeric (indicates v1 API IDs)."
+(defun org-todoist--is-v9 ()
+  "Check if any org-todoist-ids are numeric (indicates v9 API IDs)."
   (catch 'found
     (org-element-map (org-todoist--file-ast) 'headline
       (lambda (hl)
-        (when-let* ((id (org-todoist--get-prop hl org-todoist--id-property))
-                    (id-num (string-to-number id)))
-          (unless (or (zerop id-num)
-                      (string= id org-todoist--default-id))
+        (when-let* ((supported (member
+                                (org-todoist--get-todoist-type hl t)
+                                `(,org-todoist--task-type
+                                  ,org-todoist--section-type
+                                  ,org-todoist--project-type)))
+                    (id (org-todoist--get-prop hl org-todoist--id-property))
+                    (is-old (org-todoist--id-is-v9 id)))
+          (unless (string= id org-todoist--default-id)
             (throw 'found t))))
       nil t)
     nil))
 
-(defun org-todoist--is-v2 ()
+(defun org-todoist--is-v1 ()
   "Check if IDs appear to be in v2 UUID format."
-  (not (org-todoist--is-v1)))
+  (not (org-todoist--is-v9)))
 
 (defun org-todoist--do-reset (ARG)
   "Sync with a full reset token.
@@ -2024,6 +2028,10 @@ After user confirms, performs an incremental sync first, then full reset."
       (message "Resetting...")
       (org-todoist--do-reset ARG))))
 
+(defun org-todoist--id-is-v9 (id)
+  "String `ID' contains only numbers."
+  (string-match-p "^[0-9]+$" id))
+
 ;; User functions
 
 ;;;###autoload
@@ -2056,12 +2064,27 @@ and opens the GitHub issue creation page."
   "Display diagnostic information in a temporary buffer.
 Includes last request, response, diff, and push information."
   (interactive)
+  (message "Preparing diagnostics. This may take a moment...")
   (let ((buf (get-buffer-create "*Org-Todoist Diagnostics*"))
         (inhibit-read-only t))
     (with-current-buffer buf
       (view-mode -1)
       (erase-buffer)
       (org-mode)
+
+      ;; API Version Warning
+      (when (or (not org-todoist-use-v1-api)
+                (org-todoist--is-v9))
+        (insert "*WARNING:* Using deprecated Todoist API v9\n"
+                "To upgrade, run:\n"
+                "#+begin_src emacs-lisp\n"
+                "(org-todoist-migrate-to-v1)\n"
+                "#+end_src\n"
+                "And add the following to your emacs init configuration:\n"
+                "#+begin_src emacs-lisp\n"
+                "(setq org-todoist-use-v1-api t)\n"
+                "#+end_src\n"
+                "===============================================\n\n"))
 
       ;; Unified Diff section
       (insert "* Unified Diff vs Last Snapshot\n")
@@ -2218,7 +2241,7 @@ format used by API v1. This should only be run once. It requires
         (lambda (hl)
           (let ((id (org-entry-get hl org-todoist--id-property))
                 (type (org-todoist--get-todoist-type hl t)))
-            (when (and id (not (string= id org-todoist--default-id)) (string-match-p "^[0-9]+$" id))
+            (when (and id (not (string= id org-todoist--default-id)) (org-todoist--id-is-v9 id))
               (cond
                ((string= type org-todoist--project-type) (push id projects))
                ((string= type org-todoist--section-type) (push id sections))
