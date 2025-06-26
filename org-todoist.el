@@ -176,12 +176,64 @@ this directory must be accessible on all PCs running the sync command.")
 
 (defconst org-todoist--sync-buffer-file "SYNC-BUFFER")
 
+(defconst org-todoist--last-response-file "last-response.json")
+
+(defconst org-todoist--last-request-file "last-request.json")
+
                                         ;Debug data;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defvar org-todoist--sync-err nil "The error from the last sync, if any.")
 (defvar org-todoist-keep-old-sync-tokens nil)
 (defvar org-todoist--request-preview nil
   "What the commands section of the next request will be.
 Set by `org-todoist--push-test'")
+
+(defun org-todoist--set-last-response (JSON)
+  "Store the last Todoist response `JSON' to a file."
+  (with-temp-file (org-todoist--storage-file org-todoist--last-response-file)
+    (insert JSON)))
+
+(defun org-todoist--get-last-response ()
+  "Get the contents of `org-todoist--last-response-file' as a pretty JSON string."
+  (when-let ((file (org-todoist--storage-file org-todoist--last-response-file)))
+    (with-temp-buffer (insert-file-contents file)
+                      (json-pretty-print-buffer)
+                      (buffer-string))))
+
+(defun org-todoist--set-last-request (REQUEST)
+  "Store the last Todoist request `REQUEST' to a file."
+  (with-temp-file (org-todoist--storage-file org-todoist--last-request-file)
+    (insert REQUEST)))
+
+(defun org-todoist--get-last-request ()
+  "Store the last Todoist request `REQUEST' to a file."
+  (when-let ((file (org-todoist--storage-file org-todoist--last-request-file)))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (let* ((decoded (url-unhex-string (buffer-substring-no-properties (point-min) (point-max))))
+             (params (url-parse-query-string decoded))
+             (formatted (mapconcat
+                         (lambda (param)
+                           (let* ((key (car param))
+                                  (value (cdr param))
+                                  (parsed-value (cond
+                                                 ((member key '("resource_types" "commands"))
+                                                  (json-read-from-string (car value)))
+                                                 (t value))))
+                             (concat (json-encode key) ": "
+                                     (json-encode parsed-value))))
+                         params
+                         ",\n")))
+        (erase-buffer)
+        (insert "{\n" formatted "\n}"))
+      (json-pretty-print-buffer)
+      (buffer-string))))
+
+(defun org-todoist--get-file-string (FILE)
+  "Get the contents of `org-todoist-storage-file' `FILE' as a string."
+  (if-let* ((file (org-todoist--storage-file FILE))
+            (file-exists-p file))
+      (with-temp-buffer (insert-file-contents file)
+                        (buffer-substring-no-properties (point-min) (point-max)))))
 
                                         ;Hooks;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--item-close-hook ()
@@ -202,8 +254,9 @@ Set by `org-todoist--push-test'")
        request-data
        (lambda (response)
          (if response
-             (when-let ((token (assoc-default 'sync_token response)))
-               (org-todoist--set-sync-token token))
+             (progn (when-let ((token (assoc-default 'sync_token response)))
+                      (org-todoist--set-sync-token token))
+                    (org-todoist--set-last-response response))
            (message "item_close hook failed. See org-todoist--sync-err for details.")))))))
 
 ;; NOTE this requires it to be done from emacs and not eg. orgzly
@@ -375,7 +428,7 @@ the Todoist project, section, and optionally parent task."
     (insert (org-todoist-org-element-to-string AST))))
 
 (defun org-todoist--get-last-sync-buffer-ast ()
-  "Retrive the last org syntax tree `AST'."
+  "Retrieve the last org syntax tree `AST'."
   (let ((file (org-todoist--storage-file org-todoist--sync-buffer-file)))
     (when (file-exists-p file)
       (with-temp-buffer
@@ -474,7 +527,7 @@ the Todoist project, section, and optionally parent task."
                                        (buffer-substring-no-properties headers-end (point-max))
                                      (buffer-string)))
                         (response (json-read-from-string resp-body)))
-                   (setq org-todoist--last-response response)
+                   (org-todoist--set-last-response resp-body)
                    (apply callback-fn (cons response callback-args)))
                (setq org-todoist--sync-err (format "curl exited with code %d: %s" exit-code (buffer-string)))
                (apply callback-fn (cons nil callback-args)))) ; Call with nil on error
@@ -496,7 +549,7 @@ the Todoist project, section, and optionally parent task."
                         (goto-char url-http-end-of-headers)
                         (let* ((resp-str (decode-coding-region (point) (point-max) 'utf-8 t))
                                (response (json-read-from-string resp-str)))
-                          (setq org-todoist--last-response response)
+                          (org-todoist--set-last-response resp-str)
                           (apply callback-fn (cons response callback-args))))))
                   nil
                   'silent
@@ -515,7 +568,7 @@ Please run `org-todoist-migrate-to-v1' and set `org-todoist-use-v1-api' to `t' t
       (user-error "Org-todoist has recently upgraded to the unified API v1!
 Please set `org-todoist-use-v1-api' to `t' to continue")))
   (let ((encoded-data (org-todoist--encode request-data)))
-    (setq org-todoist--last-request encoded-data)
+    (org-todoist--set-last-request encoded-data)
     (if (executable-find "curl")
         (org-todoist--api-call-curl encoded-data callback-fn callback-args)
       (org-todoist--api-call-url-retrieve encoded-data callback-fn callback-args))))
@@ -855,8 +908,8 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
 
 (defun org-todoist--id-arg (id &optional command-type)
   "Return the correct id argument for the current API version.
-For some commands like item_complete and item_delete, v9 API uses 'ids'
-instead of 'id'."
+For some commands like item_complete and item_delete, v9 API uses ids
+instead of id."
   (if (and (not org-todoist-use-v1-api)
            (member command-type '("item_complete" "item_delete")))
       `("ids" . (,id))
@@ -2042,7 +2095,7 @@ After user confirms, performs an incremental sync first, then full reset."
   (let* ((uid (org-entry-get nil "responsible_uid"))
          (collaborator (when uid (org-todoist--get-by-id org-todoist--collaborator-type uid (org-todoist--file-ast))))
          (name (when collaborator (org-element-property :raw-value collaborator)))
-         (pos (save-excursion 
+         (pos (save-excursion
                 (goto-char (org-entry-beginning-position))
                 (search-forward " " (line-end-position) t 3) ; Skip past TODO state and priority
                 (point)))
@@ -2100,8 +2153,8 @@ Includes last request, response, diff, and push information."
       ;; API Version Warning
       (when (or (not org-todoist-use-v1-api)
                 (org-todoist--is-v9))
-        (insert "*WARNING:* Using deprecated Todoist API v9\n"
-                "To upgrade, run:\n"
+        (insert "*WARNING:* Using deprecated Todoist Sync API v9\n"
+                "To upgrade to the new Unified API v1, run:\n"
                 "#+begin_src emacs-lisp\n"
                 "(org-todoist-migrate-to-v1)\n"
                 "#+end_src\n"
@@ -2143,48 +2196,27 @@ Includes last request, response, diff, and push information."
 
       ;; Last Request section
       (insert "* Last Request\n")
-      (if org-todoist--last-request
-          (progn
-            (insert "#+BEGIN_SRC json\n")
-            (insert (with-temp-buffer
-                      (let* ((decoded (url-unhex-string org-todoist--last-request))
-                             (params (url-parse-query-string decoded))
-                             (formatted (mapconcat
-                                         (lambda (param)
-                                           (let* ((key (car param))
-                                                  (value (cdr param))
-                                                  (parsed-value (cond
-                                                                 ((member key '("resource_types" "commands"))
-                                                                  (json-read-from-string (car value)))
-                                                                 (t value))))
+      (let ((org-todoist-last-request (org-todoist--get-last-request))
+            (org-todoist-last-response (org-todoist--get-last-response)))
+        (if org-todoist-last-request
+            (insert "#+BEGIN_SRC json\n"
+                    org-todoist-last-request
+                    "\n#+END_SRC")
+          (insert "No request recorded"))
+        (insert "\n\n")
 
-                                             (concat (json-encode key) ": "
-                                                     (json-encode parsed-value))))
-                                         params
-                                         ",\n")))
-                        (insert "{\n" formatted "\n}"))
-                      (json-pretty-print-buffer)
-                      (buffer-string)))
-            (insert "\n#+END_SRC"))
-        (insert "No request recorded"))
-      (insert "\n\n")
-
-      ;; Last Response section
-      (insert "* Last Response\n")
-      (if org-todoist--last-response
-          (progn
-            (insert "#+BEGIN_SRC json\n")
-            (insert (with-temp-buffer
-                      (insert (json-encode org-todoist--last-response))
-                      (json-pretty-print-buffer)
-                      (buffer-string)))
-            (insert "\n#+END_SRC"))
-        (insert "No response recorded"))
+        ;; Last Response section
+        (insert "* Last Response\n")
+        (if org-todoist-last-response
+            (insert "#+BEGIN_SRC json\n"
+                    org-todoist-last-response
+                    "\n#+END_SRC")
+          (insert "No response recorded"))
 
       (goto-char (point-min))
       (org-fold-show-all)
       (view-mode 1)
-      (pop-to-buffer buf))))
+      (pop-to-buffer buf)))))
 
 ;;;###autoload
 (defun org-todoist-background-sync ()
