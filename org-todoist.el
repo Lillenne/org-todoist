@@ -63,9 +63,10 @@ This value must fall between `org-priority-lowest' and `org-priority-highest'.")
 
 (defvar org-todoist-api-token nil "The API token to use to sync with Todoist.")
 
-(defvar org-todoist-use-v1-api nil "Use Todoist API v1.
-If nil, use the deprecated Sync API v9.
-You should set this to t after running `org-todoist-migrate-to-v1'.")
+(defvar org-todoist-api-version 'sync-v9
+  "Which Todoist API version to use.
+Valid values: 'sync-v9 (Sync API v9) or 'unified-v1 (Unified API v1).
+If nil, defaults to 'sync-v9 for backward compatibility.")
 
 (defvar org-todoist-delete-remote-items nil
   "Delete items on Todoist when deleted from the variable `org-todoist-file'.
@@ -402,10 +403,12 @@ the Todoist project, section, and optionally parent task."
 
                                         ;Implementation;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--sync-endpoint ()
-  "Return the correct Todoist Sync API endpoint URL."
-  (if org-todoist-use-v1-api
-      "https://api.todoist.com/api/v1/sync"
-    "https://api.todoist.com/sync/v9/sync"))
+  "Return the correct Todoist API endpoint URL based on version."
+  (cond
+   ((eq org-todoist-api-version 'unified-v1)
+    "https://api.todoist.com/api/v1/sync")
+   ((or (eq org-todoist-api-version 'sync-v9) (null org-todoist-api-version))
+    "https://api.todoist.com/sync/v9/sync")))
 
 (defun org-todoist--storage-file (FILE)
   "Determine full path of `FILE' relative to the `org-todoist-storage-dir'."
@@ -573,12 +576,10 @@ the Todoist project, section, and optionally parent task."
 `callback-fn' is a function to call with the JSON response.
 `callback-args' are additional arguments for the callback.
 Uses `curl' if available, otherwise falls back to `url-retrieve'."
-  (unless org-todoist-use-v1-api
+  (when (eq org-todoist-api-version 'sync-v9)
     (if (file-exists-p (org-todoist-file))
-        (user-error "Org-todoist has recently upgraded to the unified API v1!
-Please run `org-todoist-migrate-to-v1' and set `org-todoist-use-v1-api' to `t' to continue")
-      (user-error "Org-todoist has recently upgraded to the unified API v1!
-Please set `org-todoist-use-v1-api' to `t' to continue")))
+        (user-error "Sync API v9 is deprecated! Run 'org-todoist-migrate-to-v1' and set 'org-todoist-api-version' to 'unified-v1'")
+      (user-error "Sync API v9 is deprecated! Set 'org-todoist-api-version' to 'unified-v1'")))
   (let ((encoded-data (org-todoist--encode request-data)))
     (org-todoist--set-last-request encoded-data)
     (if (executable-find "curl")
@@ -916,7 +917,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
   "If the `NODE' has the `org-todoist--ignored-node-type'."
   (string= (org-todoist--get-todoist-type NODE t) org-todoist--ignored-node-type))
 
-(defun org-todoist--my-id ()
+(defun org-todoist-my-id ()
   "Get the current user's Todoist uid."
   (unless org-todoist-my-id
     (setq org-todoist-my-id (org-todoist--get-prop (--first (string-equal-ignore-case (user-full-name) (org-element-property :raw-value it))
@@ -2207,17 +2208,16 @@ Includes last request, response, diff, and push information."
       (erase-buffer)
       (org-mode)
 
-      ;; API Version Warning
-      (when (or (not org-todoist-use-v1-api)
-                (org-todoist--is-v9))
+      ;; API Version Warning  
+      (when (or (null org-todoist-api-version) (eq org-todoist-api-version 'sync-v9))
         (insert "*WARNING:* Using deprecated Todoist Sync API v9\n"
-                "To upgrade to the new Unified API v1, run:\n"
+                "Migrate to Unified API v1 with:\n"
                 "#+begin_src emacs-lisp\n"
                 "(org-todoist-migrate-to-v1)\n"
                 "#+end_src\n"
                 "And add the following to your emacs init configuration:\n"
                 "#+begin_src emacs-lisp\n"
-                "(setq org-todoist-use-v1-api t)\n"
+                "(setq org-todoist-api-version 'unified-v1)\n"
                 "#+end_src\n"
                 "===============================================\n\n"))
 
@@ -2421,7 +2421,7 @@ You MUST set org-todoist-use-v1-api to 't' to continue using org-todoist without
 With prefix `ARG', include unassigned tasks.
 `USER' defaults to the current user."
   (interactive (list current-prefix-arg
-                     (or org-todoist-my-id
+                     (or (org-todoist-my-id)
                          (org-todoist--get-prop (org-todoist--select-user "Which user? (set org-todoist-my-id to avoid this prompt) ")
                                                 org-todoist--id-property))))
   (let ((org-agenda-files (list (org-todoist-file))))
