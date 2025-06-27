@@ -2038,9 +2038,12 @@ Note, a \n character is appended if not present."
   (not (org-todoist--is-v9)))
 
 (defun org-todoist--do-reset (ARG)
-  "Sync with a full reset token.
+  "Sync with a full reset token and overwrite the SYNC-BUFFER.
 `ARG' is passed to `org-todoist--do-sync'."
-  (org-todoist--do-sync "*" (null ARG)))
+  (let ((sb (org-todoist--storage-file org-todoist--sync-buffer-file)))
+  (when (file-exists-p sb)
+    (copy-file sb (org-todoist-file) t))
+  (org-todoist--do-sync "*" (null ARG))))
 
 (defun org-todoist--verify-changes-before-reset (&optional ARG)
   "Verify changes with user before performing a full sync reset.
@@ -2440,6 +2443,12 @@ With prefix `ARG', include unassigned tasks.
                             current-buf)))))
 
 ;;;###autoload
+(defun org-todoist-toggle-remote-deletion ()
+  "Toggle remote item deletion."
+  (interactive)
+  (setq org-todoist-delete-remote-items (not org-todoist-delete-remote-items)))
+
+;;;###autoload
 (defun org-todoist-sync (&optional ARG)
   "Perform a bidirectional incremental sync with Todoist.
 
@@ -2488,7 +2497,7 @@ Local changes that haven't been synced will be preserved during reset."
     ("r" "Force Full Reset" org-todoist--reset)
     ("b" "Start background sync" org-todoist-background-sync)
     ("B" "Stop background sync" org-todoist-cancel-background-sync)]
-   ["Filters"
+   ["View"
     ("m" "My tasks" org-todoist-my-tasks)
     ("x" "Last quick task" org-todoist-open-last-quick-task-in-app)
     ("G" "Show assignees" org-todoist-show-all-assignees)]
@@ -2498,6 +2507,8 @@ Local changes that haven't been synced will be preserved during reset."
     ("t" "Tag user" org-todoist-tag-user)
     ("i" "Ignore Subtree" org-todoist-ignore-subtree)
     ("a" "Add Subproject" org-todoist-add-subproject)]
+   ["Quick Config"
+    ("D" "Toggle delete remote items" org-todoist-toggle-remote-deletion)]
    ["Diagnostics"
     ("D" "Show Diagnostics" org-todoist-diagnose)
     ("P" "Test Push Commands" org-todoist--push-test)
