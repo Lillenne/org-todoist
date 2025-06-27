@@ -196,9 +196,6 @@ this directory must be accessible on all PCs running the sync command.")
                                         ;Debug data;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defvar org-todoist--sync-err nil "The error from the last sync, if any.")
 (defvar org-todoist-keep-old-sync-tokens nil)
-(defvar org-todoist--request-preview nil
-  "What the commands section of the next request will be.
-Set by `org-todoist--push-test'")
 
 (defun org-todoist--set-last-response (JSON)
   "Store the last Todoist response `JSON' to a file."
@@ -1473,7 +1470,7 @@ under `PARENT'.
 
 When SOURCE is specified, search for the node from there. Else search
 from PARENT."
-  (if-let* ((found (org-todoist--get-by-id nil ID (if SOURCE SOURCE PARENT)))
+  (if-let* ((found (org-todoist--get-by-id nil ID (or SOURCE PARENT)))
             (updated (org-todoist--add-all-properties found PROPERTIES SKIP)))
       (progn
         (org-todoist--insert-identifier updated TYPE) ;; Probably not the best place for this. Newly created items may not have a type
@@ -2134,7 +2131,7 @@ After user confirms, performs an incremental sync first, then full reset."
 (defun org-todoist-quick-task (task-text note reminder)
   "Create a task in Todoist using natural language processing.
 TASK-TEXT should be a natural language task description with optional due date.
-Example: 'Submit report by tomorrow 5pm priority 2'"
+Example: 'Submit report by tomorrow 5pm p2'"
   (interactive (list (read-string "Task text: ")
                      (read-string "Comment (empty for none): ")
                      (read-string "Reminder time (empty for none): ")))
@@ -2288,10 +2285,10 @@ Includes last request, response, diff, and push information."
   "Sync with Todoist servers in the background."
   (interactive)
   (unless org-todoist--background-timer
-  (setq org-todoist--background-timer
-        (run-at-time org-todoist-background-sync-offset
-                     org-todoist-background-sync-interval
-                     #'org-todoist-background-sync))))
+    (setq org-todoist--background-timer
+          (run-at-time org-todoist-background-sync-offset
+                       org-todoist-background-sync-interval
+                       #'org-todoist-background-sync))))
 
 ;;;###autoload
 (defun org-todoist-unassign-task ()

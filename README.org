@@ -162,20 +162,72 @@ Org Todoist requires a [[https://todoist.com/help/articles/find-your-api-token-J
 #+end_src
 
 Additionally, Todoist markdown lists use 4 spaces vs the default 2 spaces for org plain lists. This is compenated for by using a file-local variable in the ~org-todoist-file~ header to set ~org-list-indent-offset~ to 2 (2 base + 2 offset = Todoist's 4). However, this means that when accessing the file for the first time, you will be prompted to allow "potentially unsafe" file-local variables. *You must accept this or manually set the value otherwise this may cause sync errors*.
+
+** Autoloads
+The following commands are automatically available after installation (no require needed):
+
+#+begin_src emacs-lisp
+;; Sync commands
+(org-todoist-sync)
+(org-todoist-background-sync)
+(org-todoist-ediff-snapshot)
+
+;; Task management
+(org-todoist-assign-task)
+(org-todoist-unassign-task)
+(org-todoist-ignore-subtree)
+(org-todoist-add-subproject)
+
+;; Capture integration
+(org-todoist-project-notes)
+(org-todoist-find-project-and-section)
+
+;; Diagnostics
+(org-todoist-diagnose)
+(org-todoist-report-bug)
+#+end_src
 ** Updating from Sync v9 endpoint to the new unified API v1
 1. Migrate your current ~org-todoist-file~ to conform to the new format via ~org-todoist-migrate-to-v1~
 2. Opt in to using the new unified API v1 after migration setting the ~org-todoist-use-v1-api~ variable to ~t~
 ** Optional
-- ~org-todoist-delete-remote-items~ - If non-nil, delete items no longer present in the org todoist buffer after the last sync. *This will also delete tasks refiled or archived to a separate file from Todoist*.
-- ~org-todoist-file~ - The file to use for Todoist tasks.
-- ~org-todoist-use-auto-reminder~ - If newly created tasks should use Todoist's default reminder. Default ~t~.
-- ~org-todoist-show-n-levels~ - The fold level of the org buffer after sync, with caveats. See docstring. Default show all.
-- ~org-todoist-todo-keyword~ - New tasks are given this keyword.
-- ~org-todoist-done-keyword~ - Completed tasks are given this keyword.
-- ~org-todoist-deleted-keyword~ - Tasks with this keyword are deleted remotely.
-- ~org-todoist-storage-dir~ - Directory for storing Todoist sync_tokens and the previous org file for detecting changes to push. If using multiple computers and a synced file solution, this directory must be accessible on all PCs.
-- ~org-todoist-extract-deleted~ - If remotely deleted items should be removed from the ~org-todoist-file~.
-- ~org-todoist-my-id~ - (Currently unused) Your todoist ID. This will be inferred if your name is Todoist matches ~user-full-name~. Otherwise, you can set this property to the value of "tid" in the property drawer under "Todoist Metadata" > "Collaborators" > "<your-name>".
+*** Core Configuration
+- ~org-todoist-p1~ - Priority character for Todoist P1 (default: ?A)
+- ~org-todoist-p2~ - Priority character for Todoist P2 (default: ?B) 
+- ~org-todoist-p3~ - Priority character for Todoist P3 (default: ?C)
+- ~org-todoist-p4~ - Priority character for Todoist P4 (default: ?D)
+- ~org-todoist-priority-default~ - Default priority for new tasks (default: ?D)
+- ~org-todoist-user-headline~ - Heading title for collaborators section (default: "Collaborators")
+- ~org-todoist-metadata-headline~ - Heading title for metadata section (default: "Todoist Metadata")
+- ~org-todoist-tz~ - Timezone for date conversions (default: system timezone)
+- ~org-todoist-lang~ - Language for natural date strings (default: "en")
+- ~org-todoist-my-id~ - Your Todoist user ID (auto-detected if name matches)
+- ~org-todoist-use-v1-api~ - Use newer Todoist API v1 (default: nil)
+
+*** Interface
+- ~org-todoist-show-n-levels~ - Fold level after sync:
+  - nil = Don't change folds
+  - 2 = Show projects
+  - 3 = Show sections
+  - 4 = Show root tasks
+  - 5 = Show root tasks + 1 level of subtasks
+  - 'no-fold = Expand everything
+  - 'todo-tree = Show todo tree (default: nil)
+- ~org-todoist-comment-tag-user-pretty~ - Format user mentions as org links instead of markdown (default: nil)
+
+*** Behavior
+- ~org-todoist-delete-remote-items~ - Delete items removed from org file (default: nil)
+- ~org-todoist-file~ - Todoist org filename (default: "todoist.org")
+- ~org-todoist-use-auto-reminder~ - Use default reminders for new tasks (default: t)
+- ~org-todoist-infer-project-for-capture~ - Use projectile project for capture templates (default: t)
+- ~org-todoist-extract-deleted~ - Remove deleted items from org file (default: nil)
+- ~org-todoist-storage-dir~ - Storage directory for sync data (default: ~/.cache/org-todoist)
+
+*** Status Keywords
+- ~org-todoist-todo-keyword~ - Active tasks (default: "TODO")
+- ~org-todoist-done-keyword~ - Completed tasks (default: "DONE") 
+- ~org-todoist-deleted-keyword~ - Deleted tasks (default: "CANCELED")
+
+*** Advanced
 
 ** Troubleshooting
 For troubleshooting errors, you can use the following variables and methods:
