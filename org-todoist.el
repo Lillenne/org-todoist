@@ -138,6 +138,15 @@ this directory must be accessible on all PCs running the sync command.")
 (defvar org-todoist--last-quick-task-url nil
   "Stores the url of the last quick task.")
 
+(defvar org-todoist-background-sync-offset 30
+  "Delay after calling `org-todoist-background-sync' for initial run.")
+
+(defvar org-todoist-background-sync-interval 900
+  "Number of seconds between background syncs.")
+
+(defvar org-todoist--background-timer nil
+  "Timer for running background syncs.")
+
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators") "The list of resource types to sync.")
 
@@ -575,6 +584,12 @@ Please set `org-todoist-use-v1-api' to `t' to continue")))
     (if (executable-find "curl")
         (org-todoist--api-call-curl encoded-data callback-fn callback-args)
       (org-todoist--api-call-url-retrieve encoded-data callback-fn callback-args))))
+
+(defun org-todoist--do-background-sync ()
+  "Sync with Todoist servers in the background."
+  (if (string= (buffer-file-name) (org-todoist-file))
+      (message "Skipping background sync with Todoist servers since buffer is active...")
+    (org-todoist-sync t)))
 
 (defun org-todoist--do-sync (TOKEN OPEN)
   "Diff the Todoist org file, perform the API request, and update the file.
@@ -2258,14 +2273,25 @@ Includes last request, response, diff, and push information."
         (goto-char (point-min))
         (org-fold-show-all)
         (view-mode 1)
-        (pop-to-buffer buf)))))
+        (pop-to-buffer buf))))
+  (message "Diagostic generation complete."))
+
+;;;###autoload
+(defun org-todoist-cancel-background-sync ()
+  "Cancel sync with Todoist servers in the background."
+  (interactive)
+  (when org-todoist--background-timer
+    (cancel-timer org-todoist--background-timer)))
 
 ;;;###autoload
 (defun org-todoist-background-sync ()
   "Sync with Todoist servers in the background."
-  (if (string= (buffer-file-name) (org-todoist-file))
-      (message "Skipping background sync with Todoist servers since buffer is active...")
-    (org-todoist-sync t)))
+  (interactive)
+  (unless org-todoist--background-timer
+  (setq org-todoist--background-timer
+        (run-at-time org-todoist-background-sync-offset
+                     org-todoist-background-sync-interval
+                     #'org-todoist-background-sync))))
 
 ;;;###autoload
 (defun org-todoist-unassign-task ()
@@ -2462,21 +2488,23 @@ Local changes that haven't been synced will be preserved during reset."
     ("q" "Quick Task" org-todoist-quick-task)
     ("s" "Sync" org-todoist-sync)
     ("e" "Compare with Ediff" org-todoist-ediff-snapshot)
-    ("r" "Force Full Reset" org-todoist--reset)]
+    ("r" "Force Full Reset" org-todoist--reset)
+    ("b" "Start background sync" org-todoist-background-sync)
+    ("B" "Stop background sync" org-todoist-cancel-background-sync)]
    ["Filters"
     ("m" "My tasks" org-todoist-my-tasks)
-    ("x" "Last quick task" org-todoist-open-last-quick-task-in-app)]
+    ("x" "Last quick task" org-todoist-open-last-quick-task-in-app)
+    ("G" "Show assignees" org-todoist-show-all-assignees)]
    ["Item Actions"
     ("g" "Assign" org-todoist-assign-task)
-    ("G" "Show assignees" org-todoist-show-all-assignees)
     ("u" "Unassign" org-todoist-unassign-task)
     ("t" "Tag user" org-todoist-tag-user)
     ("i" "Ignore Subtree" org-todoist-ignore-subtree)
     ("a" "Add Subproject" org-todoist-add-subproject)]
    ["Diagnostics"
-    ("d" "Show Diagnostics" org-todoist-diagnose)
-    ("p" "Test Push Commands" org-todoist--push-test)
-    ("b" "Report Bug" org-todoist-report-bug)
+    ("D" "Show Diagnostics" org-todoist-diagnose)
+    ("P" "Test Push Commands" org-todoist--push-test)
+    ("R" "Report Bug" org-todoist-report-bug)
     ("M" "Migrate to V1 API" org-todoist-migrate-to-v1)]])
 
 (provide 'org-todoist)
