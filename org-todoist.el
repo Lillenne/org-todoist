@@ -135,6 +135,9 @@ this directory must be accessible on all PCs running the sync command.")
   "Gets the full path of the variable `org-todoist-file'."
   (expand-file-name org-todoist-file org-directory))
 
+(defvar org-todoist--last-quick-task-url nil
+  "Stores the url of the last quick task.")
+
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators") "The list of resource types to sync.")
 
@@ -1770,7 +1773,6 @@ RETURN a value representing if the buffer was modified."
              (current-mark (when mark-active (mark)))
              (inhibit-read-only t)
              (modified (not (string= new-str (buffer-substring-no-properties (point-min) (point-max))))))
-        (setq td/str new-str)
         (when modified
           ;; Create temp buffer with new content
           (with-temp-buffer
@@ -2113,6 +2115,46 @@ After user confirms, performs an incremental sync first, then full reset."
   (org-map-entries #'org-todoist-show-assignee))
 
 ;;;###autoload
+(defun org-todoist-quick-task (task-text note reminder)
+  "Create a task in Todoist using natural language processing.
+TASK-TEXT should be a natural language task description with optional due date.
+Example: 'Submit report by tomorrow 5pm priority 2'"
+  (interactive (list (read-string "Task text: ")
+                     (read-string "Comment (empty for none): ")
+                     (read-string "Reminder time (empty for none): ")))
+  (unless org-todoist-api-token
+    (user-error "Please set org-todoist-api-token"))
+  
+  (let* ((url-request-method "POST")
+         (url-request-extra-headers
+          `(("Content-Type" . "application/json")
+            ("Authorization" . ,(concat "Bearer " org-todoist-api-token))))
+         (url-request-data
+          (json-encode `(("text" . ,task-text)
+                         ("note" . ,note)
+                         ("reminder" . ,reminder)
+                         ("auto_reminder" . ,org-todoist-use-auto-reminder)))))
+
+    (url-retrieve "https://api.todoist.com/api/v1/tasks/quick"
+                  (lambda (status)
+                    (if-let ((http-error (plist-get status :error)))
+                        (message "Error creating task: %s" http-error)
+                      (with-current-buffer (current-buffer)
+                        (goto-char url-http-end-of-headers)
+                        (let* ((response (json-read))
+                               (task-url (concat "todoist://task?id=" (alist-get 'id response))))
+                          (setq org-todoist--last-quick-task-url task-url)
+                          (message "Task created: %s (%s)"
+                                   (alist-get 'content response)
+                                   task-url))))))))
+
+(defun org-todoist-open-last-quick-task-in-app ()
+  "Xdg-open the last quick task url."
+  (interactive)
+  (unless org-todoist--last-quick-task-url
+    (user-error "No previous quick task!"))
+  (browse-url-xdg-open org-todoist--last-quick-task-url))
+
 (defun org-todoist-report-bug ()
   "Report a bug with org-todoist.
 Generates diagnostics, exports to GitHub Flavored Markdown, copies to clipboard,
@@ -2213,10 +2255,10 @@ Includes last request, response, diff, and push information."
                     "\n#+END_SRC")
           (insert "No response recorded"))
 
-      (goto-char (point-min))
-      (org-fold-show-all)
-      (view-mode 1)
-      (pop-to-buffer buf)))))
+        (goto-char (point-min))
+        (org-fold-show-all)
+        (view-mode 1)
+        (pop-to-buffer buf)))))
 
 ;;;###autoload
 (defun org-todoist-background-sync ()
@@ -2347,6 +2389,20 @@ format used by API v1. This should only be run once. It requires
       (message "Migration to API v1 complete. Your Todoist file has been updated with new IDs.
 You MUST set org-todoist-use-v1-api to 't' to continue using org-todoist without losing data!"))))
 
+;;;###autoload
+(defun org-todoist-my-tasks (&optional ARG USER)
+  "Create an org agenda view of tasks assigned to a specific `USER'.
+With prefix `ARG', include unassigned tasks.
+`USER' defaults to the current user."
+  (interactive (list current-prefix-arg
+                     (or org-todoist-my-id
+                         (org-todoist--get-prop (org-todoist--select-user "Which user? (set org-todoist-my-id to avoid this prompt) ")
+                                                org-todoist--id-property))))
+  (let ((org-agenda-files (list (org-todoist-file))))
+    (if ARG
+        (org-tags-view nil (concat "+TODOIST_TYPE={TASK}+responsible_uid={" USER "}|+TODOIST_TYPE={TASK}-responsible_uid"))
+      (org-tags-view nil (concat "+TODOIST_TYPE={TASK}+responsible_uid={" USER "}")))))
+
 ;;;###autoload 
 (defun org-todoist-ediff-snapshot ()
   "Compare current org-todoist file with last synced snapshot using ediff."
@@ -2403,10 +2459,14 @@ Local changes that haven't been synced will be preserved during reset."
 (transient-define-prefix org-todoist-dispatch ()
   "Org-Todoist interactive interface"
   [["Sync Operations"
+    ("q" "Quick Task" org-todoist-quick-task)
     ("s" "Sync" org-todoist-sync)
     ("e" "Compare with Ediff" org-todoist-ediff-snapshot)
     ("r" "Force Full Reset" org-todoist--reset)]
-   ["Items"
+   ["Filters"
+    ("m" "My tasks" org-todoist-my-tasks)
+    ("x" "Last quick task" org-todoist-open-last-quick-task-in-app)]
+   ["Item Actions"
     ("g" "Assign" org-todoist-assign-task)
     ("G" "Show assignees" org-todoist-show-all-assignees)
     ("u" "Unassign" org-todoist-unassign-task)
@@ -2417,7 +2477,7 @@ Local changes that haven't been synced will be preserved during reset."
     ("d" "Show Diagnostics" org-todoist-diagnose)
     ("p" "Test Push Commands" org-todoist--push-test)
     ("b" "Report Bug" org-todoist-report-bug)
-    ("m" "Migrate to V1 API" org-todoist-migrate-to-v1)]])
+    ("M" "Migrate to V1 API" org-todoist-migrate-to-v1)]])
 
 (provide 'org-todoist)
 ;;; org-todoist.el ends here
