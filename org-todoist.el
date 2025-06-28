@@ -119,6 +119,9 @@ nil=do not adjust folds
 
 (defvar org-todoist-deleted-keyword "CANCELED" "TODO keyword for deleted Todoist tasks.")
 
+(defvar org-todoist-duration-as-timestamp nil
+  "If non-nil, use timestamp for duration instead of effort.")
+
 (defvar org-todoist-comment-tag-user-pretty nil
   "Whether tagging users in comments should be pretty.
 
@@ -997,7 +1000,20 @@ instead of id."
                                  ("type" . "item_add")
                                  ("args" . (("content" . ,title)
                                             ("description" . ,(when desc desc))
-                                            ("duration" . ,(when eff `(("amount" . ,eff) ("unit" . "minute"))))
+                                            ("duration" . ,(if org-todoist-duration-as-timestamp
+                                                             (when-let* ((planning (org-element-map hl 'planning #'identity nil t))
+                                                                        (scheduled (org-element-property :scheduled planning))
+                                                                        (type (eq (org-element-property :type scheduled) 'active-range))
+                                                                        (raw-value (org-element-property :raw-value scheduled))
+                                                                        (parts (split-string raw-value "--"))
+                                                                        (start-str (car parts))
+                                                                        (end-str (cadr parts))
+                                                                        (start-time (org-time-string-to-time start-str))
+                                                                        (end-time (org-time-string-to-time end-str))
+                                                                        (duration-seconds (float-time (time-subtract end-time start-time)))
+                                                                        (duration-minutes (/ duration-seconds 60)))
+                                                               `(("amount" . ,(round duration-minutes)) ("unit" . "minute")))
+                                                           (when eff `(("amount" . ,eff) ("unit" . "minute")))))
                                             ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
                                             ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
                                             ("priority" . ,pri)
@@ -1543,6 +1559,24 @@ inactive."
         (sch (org-todoist--scheduled-date TASK))
         (dead (org-todoist--deadline-date TASK))
         (closed (org-todoist--closed-date TASK)))
+    ;; Convert duration to timestamp range if enabled
+    (when (and org-todoist-duration-as-timestamp
+               sch
+               (assoc-default 'duration TASK))
+      (when-let* ((duration (assoc-default 'duration TASK))
+             (amount (assoc-default 'amount duration))
+             (unit (assoc-default 'unit duration))
+             (start-str (org-todoist-org-element-to-string sch))
+             (start-time (org-time-string-to-time start-str))
+             (seconds (pcase unit
+                       ("minute" (* amount 60))
+                       ("hour" (* amount 3600))
+                       ("day" (* amount 86400))
+                       (_ 0)))
+             (end-time (time-add start-time (seconds-to-time seconds)))
+             (end-str (format-time-string "%Y-%m-%d %H:%M" end-time))
+             (range-str (format "%s--<%s>" start-str end-str)))
+        (setq sch (org-timestamp-from-string range-str))))
     (when sch (setq props (plist-put props :scheduled sch)))
     (when dead (setq props (plist-put props :deadline dead)))
     (when closed (setq props (plist-put props :closed closed)))
@@ -1672,7 +1706,9 @@ appropriate symbol representation."
                           ((string-equal unit "minute") amount)
                           ((string-equal unit "day") (* 1440 amount))
                           (t nil))))
-    (org-todoist--add-prop NODE "EFFORT" (org-duration-from-minutes effortval))))
+    ;; Only set EFFORT if duration-as-timestamp is disabled
+    (unless org-todoist-duration-as-timestamp
+      (org-todoist--add-prop NODE "EFFORT" (org-duration-from-minutes effortval)))))
 
 (defun org-todoist--set-priority (NODE PRIORITY)
   "Set priority of `NODE' to equivalent of Todoist `PRIORITY'."
