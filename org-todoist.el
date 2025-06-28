@@ -261,7 +261,7 @@ this directory must be accessible on all PCs running the sync command.")
                                                 ("uuid" . ,(org-id-uuid))
                                                 ("args" . ,args)))))))
       (setq org-todoist--sync-err nil)
-      (unless org-todoist-use-v1-api
+      (unless (eq org-todoist-api-version 'unified-v1)
         (user-error "Org todoist has updated API versions! Run 'org-todoist-migrate-to-v1' and set 'org-todoist-use-v1-api' to 't' to continue using org-todoist"))
       (org-todoist--api-call
        request-data
