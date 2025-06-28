@@ -859,6 +859,22 @@ pretty-printed JSON commands."
     (goto-char (point-min)))
   (message "Commands (as JSON) written to *todoist-push-test*"))
 
+(defun org-todoist--timestamp-from-start (TIMESTAMP)
+  (org-element-create 'timestamp
+                      `(:year-start ,(org-element-property :year-start TIMESTAMP)
+                        :month-start ,(org-element-property :month-start TIMESTAMP)
+                        :day-start ,(org-element-property :day-start TIMESTAMP)
+                        :hour-start ,(org-element-property :hour-start TIMESTAMP)
+                        :minute-start ,(org-element-property :minute-start TIMESTAMP))))
+
+(defun org-todoist--timestamp-from-end (TIMESTAMP)
+  (org-element-create 'timestamp
+                      `(:year-start ,(org-element-property :year-end TIMESTAMP)
+                        :month-start ,(org-element-property :month-end TIMESTAMP)
+                        :day-start ,(org-element-property :day-end TIMESTAMP)
+                        :hour-start ,(org-element-property :hour-end TIMESTAMP)
+                        :minute-start ,(org-element-property :minute-end TIMESTAMP))))
+
 (defun org-todoist--timestamp-times-equal (T1 T2)
   "Equality comparison for org timestamp elements `T1' and `T2'."
   (and (equal (org-element-property :year-start T1) (org-element-property :year-start T2))
@@ -929,10 +945,23 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
   "Return the correct id argument for the current API version.
 For some commands like item_complete and item_delete, v9 API uses ids
 instead of id."
-  (if (and (not org-todoist-use-v1-api)
+  (if (and (not (eq org-todoist-api-version 'unified-v1))
            (member command-type '("item_complete" "item_delete")))
       `("ids" . (,id))
     `("id" . ,id)))
+
+(defun org-todoist--get-duration (hl eff)
+  "Gets the todoist item request duration.
+`HL' is the org task headline.
+`EFF' is the effort number in minutes."
+(if org-todoist-duration-as-timestamp
+    (when-let* ((scheduled (org-element-property :scheduled hl))
+                (type (eq (org-element-property :type scheduled) 'active-range))
+                (start (ts-parse-org-element (org-todoist--timestamp-from-start scheduled)))
+                (end (ts-parse-org-element (org-todoist--timestamp-from-end scheduled)))
+                (sec-diff (ts-difference end start)))
+      `(("amount" . ,(round (/ sec-diff 60))) ("unit" . "minute")))
+(when eff `(("amount" . ,(round eff)) ("unit" . "minute")))))
 
 (defun org-todoist--push (ast old)
   "Create commands necessary to transform syntax tree from `OLD' to `AST'."
@@ -1000,240 +1029,227 @@ instead of id."
                                  ("type" . "item_add")
                                  ("args" . (("content" . ,title)
                                             ("description" . ,(when desc desc))
-                                            ("duration" . ,(if org-todoist-duration-as-timestamp
-                                                             (when-let* ((planning (org-element-map hl 'planning #'identity nil t))
-                                                                        (scheduled (org-element-property :scheduled planning))
-                                                                        (type (eq (org-element-property :type scheduled) 'active-range))
-                                                                        (raw-value (org-element-property :raw-value scheduled))
-                                                                        (parts (split-string raw-value "--"))
-                                                                        (start-str (car parts))
-                                                                        (end-str (cadr parts))
-                                                                        (start-time (org-time-string-to-time start-str))
-                                                                        (end-time (org-time-string-to-time end-str))
-                                                                        (duration-seconds (float-time (time-subtract end-time start-time)))
-                                                                        (duration-minutes (/ duration-seconds 60)))
-                                                               `(("amount" . ,(round duration-minutes)) ("unit" . "minute")))
-                                                           (when eff `(("amount" . ,eff) ("unit" . "minute")))))
-                                            ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
-                                            ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
-                                            ("priority" . ,pri)
-                                            ("labels" . ,labels)
-                                            ("auto_reminder" . ,org-todoist-use-auto-reminder)
-                                            ("parent_id" . ,(org-todoist--get-task-id-position hl))
-                                            ("section_id" . ,section)
-                                            ("project_id" . ,proj)
-                                            ("responsible_uid" . ,rid))))
-                               commands)
-                         (when comments
-                           ;; Add comments
-                           (dolist (comment comments)
-                             (push (org-todoist--get-note-add id comment) commands))))
+                                            ("duration" . ,(org-todoist--get-duration hl eff))))
+                                  ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
+                                  ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
+                                  ("priority" . ,pri)
+                                  ("labels" . ,labels)
+                                  ("auto_reminder" . ,org-todoist-use-auto-reminder)
+                                  ("parent_id" . ,(org-todoist--get-task-id-position hl))
+                                  ("section_id" . ,section)
+                                  ("project_id" . ,proj)
+                                  ("responsible_uid" . ,rid))
+                         commands)
+                     (when comments
+                       ;; Add comments
+                       (dolist (comment comments)
+                         (push (org-todoist--get-note-add id comment) commands))))
 
-                     ;; when is somewhat redundant, as oldtask should not be null if there is a tid (new item)
-                     (when oldtask
-                       (unless (equal comments oldcomments)
-                         ;; TODO support comment editing. This will push any edited comments as new comments
-                         (dolist (comment (--filter (not (member it oldcomments)) comments))
-                           (push (org-todoist--get-note-add id comment) commands)))
+                   ;; when is somewhat redundant, as oldtask should not be null if there is a tid (new item)
+                   (when oldtask
+                     (unless (equal comments oldcomments)
+                       ;; TODO support comment editing. This will push any edited comments as new comments
+                       (dolist (comment (--filter (not (member it oldcomments)) comments))
+                         (push (org-todoist--get-note-add id comment) commands)))
 
-                       ;; item_move. Only one parameter can be specified
-                       (unless (and (string= section oldsection)
-                                    (string= proj oldproj)
-                                    (string= parenttask oldparenttask))
-                         (cond ((and parenttask (not (string= parenttask oldparenttask)))
-                                ;; item_move - parent task
-                                (push `(("uuid" . ,(org-id-uuid))
-                                        ("type" . "item_move")
-                                        ("args" . (("id" . ,id)
-                                                   ("parent_id" . ,parenttask))))
-                                      commands))
-
-                               ;; special case: move to unsectioned in another project
-                               ((and (or (null section) (string= "" section))
-                                     (not (string= proj oldproj)))
-                                (unless parenttask
-                                  (push `(("uuid" . ,(org-id-uuid))
-                                          ("type" . "item_move")
-                                          ("args" . (("id" . ,id)
-                                                     ("project_id" . ,proj))))
-                                        commands)))
-
-                               ;; move to another section (may be another project)
-                               ((not (string= section oldsection))
-                                ;; item_move - section
-                                (push `(("uuid" . ,(org-id-uuid))
-                                        ("type" . "item_move")
-                                        ("args" . (("id" . ,id)
-                                                   ("section_id" . ,section))))
-                                      commands))
-
-                               ((not (string= proj oldproj))
-                                (unless (string= section oldsection) ; whole section moved, ignore
-                                  ;;item_move - project
-                                  (push `(("uuid" . ,(org-id-uuid))
-                                          ("type" . "item_move")
-                                          ("args" . (("id" . ,id)
-                                                     ("project_id" . ,proj))))
-                                        commands)))))
-
-                       ;; item_update
-                       (when (or
-                              (not (string-equal title oldtitle))
-                              (not (equal desc olddesc))
-                              (not (string-equal (org-element-property :raw-value sch) (org-element-property :raw-value oldsch)))
-                              (not (string-equal (org-element-property :raw-value dead) (org-element-property :raw-value olddead)))
-                              (not (equal eff oldeff))
-                              (not (equal pri oldpri))
-                              (not (equal labels oldlabels))
-                              (not (equal rid oldrid)))
-                         ;; TODO HERE compare last repeat to old scheduled date. If same, we completed a recurring task and need to call item close
-                         ;; Doesn't work - last repeat logs when it was closed not the due date. Functionally the same except it doesn't log the completion on the todoist side, I think
-                         ;; (when (org-todoist--timestamp-times-equal last-repeat oldsch) ;; completed recurring task
-                         ;;   (push `(("uuid" . ,(org-id-uuid))
-                         ;;           ("type" . "item_close")
-                         ;;           ("args" . (("id" . ,id))))
-                         ;;         commands))
-                         (let ((req `(("type" . "item_update")
-                                      ("uuid" . ,(org-id-uuid))
-                                      ("args" . (("id" . ,id)
-                                                 ("content" . ,title)
-                                                 ("description" . ,(when desc desc))
-                                                 ("duration" . ,(when eff `(("amount" . ,eff) ("unit" . "minute"))))
-                                                 ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
-                                                 ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
-                                                 ("priority" . ,(org-todoist--get-priority hl))
-                                                 ("labels" . ,labels)
-                                                 ("responsible_uid" . ,rid))))))
-                           (push req commands)))
-
-                       ;; todo-state changed
-                       (when (not (equal todo-type old-todo-type))
-                         (if (eq 'done todo-type)
-                             (if (string= org-todoist-deleted-keyword todo-kw)
-                                 (push `(("uuid" . ,(org-id-uuid))
-                                         ("type" . "item_delete")
-                                         ("args" . (,(org-todoist--id-arg id "item_delete"))))
-                                       commands)
-                               (if is-todoist-recurring
-                                   (push `(("uuid" . ,(org-id-uuid)) ; this doesn't work with org recurring tasks since org auto-reopens with new date. The task will instead be updated with item_update
-                                           ("type" . "item_close")
-                                           ("args" . (("id" . ,id))))
-                                         commands)
-                                 (push `(("uuid" . ,(org-id-uuid))
-                                         ("type" . "item_complete")
-                                         ("args" . (,(org-todoist--id-arg id "item_complete")
-                                                    ("date_completed" .
-                                                     ,(org-todoist--timestamp-to-utc-str (org-element-property :closed hl))))))
-                                       commands)))
-                           (push `(("uuid" . ,(org-id-uuid))
-                                   ("type" . "item_uncomplete")
-                                   ("args" . (,(org-todoist--id-arg id "item_uncomplete"))))
-                                 commands))))))
-                  ((and (not section) (string= type org-todoist--section-type) (not (string= org-todoist--default-section-name title)))
-                   (if (not oldtask)
-                       (progn
-                         ;; new section
-                         (org-todoist--insert-identifier hl org-todoist--section-type)
-                         (push `(("uuid" . ,(org-id-uuid))
-                                 ("temp_id" . ,id)
-                                 ("type" . "section_add")
-                                 ("args" . (("name" . ,title)
-                                            ("project_id" . ,proj))))
-                               commands))
-                     (cond
-                      ;; section archive
-                      ((and isarchived (not oldisarchived))
-                       (push `(("uuid" . ,(org-id-uuid))
-                               ("type" . "section_archive")
-                               ("args" . (("id" . ,id))))
-                             commands))
-
-                      ;; section unarchive
-                      ((and oldisarchived (not isarchived))
-                       (push `(("uuid" . ,(org-id-uuid))
-                               ("type" . "section_unarchive")
-                               ("args" . (("id" . ,id))))
-                             commands)))
-
-                     (unless (string= title oldtitle)
-                       ;; update section
-                       (push `(("uuid" . ,(org-id-uuid))
-                               ("type" . "section_update")
-                               ("args" . (("name" . ,title)
-                                          ("id" . ,id))))
-                             commands))
-                     (unless (cl-equalp proj oldproj)
-                       ;; section_move
-                       (push `(("uuid" . ,(org-id-uuid))
-                               ("type" . "section_move")
-                               ("args" . (("id" . ,id)
-                                          ("project_id" . ,proj))))
-                             commands))))
-                  ((and (string= type org-todoist--project-type) (not (string= title "Inbox")))
-                   (if (not oldtask)
-                       ;; new project
-                       (progn (org-todoist--insert-identifier hl org-todoist--project-type)
+                     ;; item_move. Only one parameter can be specified
+                     (unless (and (string= section oldsection)
+                                  (string= proj oldproj)
+                                  (string= parenttask oldparenttask))
+                       (cond ((and parenttask (not (string= parenttask oldparenttask)))
+                              ;; item_move - parent task
                               (push `(("uuid" . ,(org-id-uuid))
-                                      ("temp_id" . ,id)
-                                      ("type" . "project_add")
-                                      ("args" . (("name" . ,title)
-                                                 ("parent_id" . ,proj))))
+                                      ("type" . "item_move")
+                                      ("args" . (("id" . ,id)
+                                                 ("parent_id" . ,parenttask))))
                                     commands))
-                     (when (not (string= title (org-element-property :raw-value oldtask)))
-                       ;; update project
-                       (push `(("uuid" . ,(org-id-uuid))
-                               ("type" . "project_update")
-                               ("args" . (("name" . ,title)
-                                          ("id" . ,id))))
-                             commands))
-                     (cond ((and isarchived (not oldisarchived))
-                            ;; archive project
-                            (push `(("uuid" . ,(org-id-uuid))
-                                    ("type" . "project_archive")
-                                    ("args" . (("id" . ,id))))
-                                  commands))
-                           ((and (not isarchived) oldisarchived)
-                            ;; unarchive project
-                            (push `(("uuid" . ,(org-id-uuid))
-                                    ("type" . "project_unarchive")
-                                    ("args" . (("id" . ,id))))
-                                  commands)))
-                     (unless (string= proj oldproj)
-                       ;; moved
-                       (push `(("uuid" . ,(org-id-uuid))
-                               ("type" . "project_move")
-                               ("args" . (("id" . ,id)
-                                          ("parent_id" . ,proj))))
-                             commands)))))))))
-    (when org-todoist-delete-remote-items
-      (org-element-map
-          old
-          'headline
-        (lambda (hl)
-          (unless (org-todoist--is-ignored hl)
-            (let ((id (org-todoist--get-prop hl org-todoist--id-property))
-                  (type (org-todoist--get-todoist-type hl)))
-              (when id
-                (let ((new (org-todoist--get-by-id type id ast)))
-                  (unless new
-                    ;; item was deleted (or archived to another file...)
-                    (cond
-                     ((string= org-todoist--task-type type)
+
+                             ;; special case: move to unsectioned in another project
+                             ((and (or (null section) (string= "" section))
+                                   (not (string= proj oldproj)))
+                              (unless parenttask
+                                (push `(("uuid" . ,(org-id-uuid))
+                                        ("type" . "item_move")
+                                        ("args" . (("id" . ,id)
+                                                   ("project_id" . ,proj))))
+                                      commands)))
+
+                             ;; move to another section (may be another project)
+                             ((not (string= section oldsection))
+                              ;; item_move - section
+                              (push `(("uuid" . ,(org-id-uuid))
+                                      ("type" . "item_move")
+                                      ("args" . (("id" . ,id)
+                                                 ("section_id" . ,section))))
+                                    commands))
+
+                             ((not (string= proj oldproj))
+                              (unless (string= section oldsection) ; whole section moved, ignore
+                                ;;item_move - project
+                                (push `(("uuid" . ,(org-id-uuid))
+                                        ("type" . "item_move")
+                                        ("args" . (("id" . ,id)
+                                                   ("project_id" . ,proj))))
+                                      commands)))))
+
+                     ;; item_update
+                     (when (or
+                            (not (string-equal title oldtitle))
+                            (not (equal desc olddesc))
+                            (not (string-equal (org-element-property :raw-value sch) (org-element-property :raw-value oldsch)))
+                            (not (string-equal (org-element-property :raw-value dead) (org-element-property :raw-value olddead)))
+                            (not (equal eff oldeff))
+                            (not (equal pri oldpri))
+                            (not (equal labels oldlabels))
+                            (not (equal rid oldrid)))
+                       ;; TODO HERE compare last repeat to old scheduled date. If same, we completed a recurring task and need to call item close
+                       ;; Doesn't work - last repeat logs when it was closed not the due date. Functionally the same except it doesn't log the completion on the todoist side, I think
+                       ;; (when (org-todoist--timestamp-times-equal last-repeat oldsch) ;; completed recurring task
+                       ;;   (push `(("uuid" . ,(org-id-uuid))
+                       ;;           ("type" . "item_close")
+                       ;;           ("args" . (("id" . ,id))))
+                       ;;         commands))
+                       (let ((req `(("type" . "item_update")
+                                    ("uuid" . ,(org-id-uuid))
+                                    ("args" . (("id" . ,id)
+                                               ("content" . ,title)
+                                               ("description" . ,(when desc desc))
+                                               ("duration" . ,(org-todoist--get-duration hl eff))
+                                               ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled))
+                                               ("deadline" . ,(org-todoist--todoist-date-object-for-kw hl :deadline))
+                                               ("priority" . ,(org-todoist--get-priority hl))
+                                               ("labels" . ,labels)
+                                               ("responsible_uid" . ,rid))))))
+                         (push req commands)))
+
+                     ;; todo-state changed
+                     (when (not (equal todo-type old-todo-type))
+                       (if (eq 'done todo-type)
+                           (if (string= org-todoist-deleted-keyword todo-kw)
+                               (push `(("uuid" . ,(org-id-uuid))
+                                       ("type" . "item_delete")
+                                       ("args" . (,(org-todoist--id-arg id "item_delete"))))
+                                     commands)
+                             (if is-todoist-recurring
+                                 (push `(("uuid" . ,(org-id-uuid)) ; this doesn't work with org recurring tasks since org auto-reopens with new date. The task will instead be updated with item_update
+                                         ("type" . "item_close")
+                                         ("args" . (("id" . ,id))))
+                                       commands)
+                               (push `(("uuid" . ,(org-id-uuid))
+                                       ("type" . "item_complete")
+                                       ("args" . (,(org-todoist--id-arg id "item_complete")
+                                                  ("date_completed" .
+                                                   ,(org-todoist--timestamp-to-utc-str (org-element-property :closed hl))))))
+                                     commands)))
+                         (push `(("uuid" . ,(org-id-uuid))
+                                 ("type" . "item_uncomplete")
+                                 ("args" . (,(org-todoist--id-arg id "item_uncomplete"))))
+                               commands))))))
+            ((and (not section) (string= type org-todoist--section-type) (not (string= org-todoist--default-section-name title)))
+             (if (not oldtask)
+                 (progn
+                   ;; new section
+                   (org-todoist--insert-identifier hl org-todoist--section-type)
+                   (push `(("uuid" . ,(org-id-uuid))
+                           ("temp_id" . ,id)
+                           ("type" . "section_add")
+                           ("args" . (("name" . ,title)
+                                      ("project_id" . ,proj))))
+                         commands))
+               (cond
+                ;; section archive
+                ((and isarchived (not oldisarchived))
+                 (push `(("uuid" . ,(org-id-uuid))
+                         ("type" . "section_archive")
+                         ("args" . (("id" . ,id))))
+                       commands))
+
+                ;; section unarchive
+                ((and oldisarchived (not isarchived))
+                 (push `(("uuid" . ,(org-id-uuid))
+                         ("type" . "section_unarchive")
+                         ("args" . (("id" . ,id))))
+                       commands)))
+
+               (unless (string= title oldtitle)
+                 ;; update section
+                 (push `(("uuid" . ,(org-id-uuid))
+                         ("type" . "section_update")
+                         ("args" . (("name" . ,title)
+                                    ("id" . ,id))))
+                       commands))
+               (unless (cl-equalp proj oldproj)
+                 ;; section_move
+                 (push `(("uuid" . ,(org-id-uuid))
+                         ("type" . "section_move")
+                         ("args" . (("id" . ,id)
+                                    ("project_id" . ,proj))))
+                       commands))))
+            ((and (string= type org-todoist--project-type) (not (string= title "Inbox")))
+             (if (not oldtask)
+                 ;; new project
+                 (progn (org-todoist--insert-identifier hl org-todoist--project-type)
+                        (push `(("uuid" . ,(org-id-uuid))
+                                ("temp_id" . ,id)
+                                ("type" . "project_add")
+                                ("args" . (("name" . ,title)
+                                           ("parent_id" . ,proj))))
+                              commands))
+               (when (not (string= title (org-element-property :raw-value oldtask)))
+                 ;; update project
+                 (push `(("uuid" . ,(org-id-uuid))
+                         ("type" . "project_update")
+                         ("args" . (("name" . ,title)
+                                    ("id" . ,id))))
+                       commands))
+               (cond ((and isarchived (not oldisarchived))
+                      ;; archive project
                       (push `(("uuid" . ,(org-id-uuid))
-                              ("type" . "item_delete")
-                              ("args" . (,(org-todoist--id-arg id "item_delete"))))
-                            commands))
-                     ((and (string= org-todoist--section-type type) (not (string= id org-todoist--default-id))) ;; Don't delete the default section
-                      (push `(("uuid" . ,(org-id-uuid))
-                              ("type" . "section_delete")
+                              ("type" . "project_archive")
                               ("args" . (("id" . ,id))))
                             commands))
-                     ((string= org-todoist--project-type type)
+                     ((and (not isarchived) oldisarchived)
+                      ;; unarchive project
                       (push `(("uuid" . ,(org-id-uuid))
-                              ("type" . "project_delete")
+                              ("type" . "project_unarchive")
                               ("args" . (("id" . ,id))))
-                            commands)))))))))))
-    (nreverse commands)))
+                            commands)))
+               (unless (string= proj oldproj)
+                 ;; moved
+                 (push `(("uuid" . ,(org-id-uuid))
+                         ("type" . "project_move")
+                         ("args" . (("id" . ,id)
+                                    ("parent_id" . ,proj))))
+                       commands)))))))))
+  (when org-todoist-delete-remote-items
+    (org-element-map
+        old
+        'headline
+      (lambda (hl)
+        (unless (org-todoist--is-ignored hl)
+          (let ((id (org-todoist--get-prop hl org-todoist--id-property))
+                (type (org-todoist--get-todoist-type hl)))
+            (when id
+              (let ((new (org-todoist--get-by-id type id ast)))
+                (unless new
+                  ;; item was deleted (or archived to another file...)
+                  (cond
+                   ((string= org-todoist--task-type type)
+                    (push `(("uuid" . ,(org-id-uuid))
+                            ("type" . "item_delete")
+                            ("args" . (,(org-todoist--id-arg id "item_delete"))))
+                          commands))
+                   ((and (string= org-todoist--section-type type) (not (string= id org-todoist--default-id))) ;; Don't delete the default section
+                    (push `(("uuid" . ,(org-id-uuid))
+                            ("type" . "section_delete")
+                            ("args" . (("id" . ,id))))
+                          commands))
+                   ((string= org-todoist--project-type type)
+                    (push `(("uuid" . ,(org-id-uuid))
+                            ("type" . "project_delete")
+                            ("args" . (("id" . ,id))))
+                          commands)))))))))))
+  (nreverse commands)))
 
 (defun org-todoist--is-subtask (NODE)
   "If `NODE' is a headline representings a substask."
@@ -1564,19 +1580,24 @@ inactive."
                sch
                (assoc-default 'duration TASK))
       (when-let* ((duration (assoc-default 'duration TASK))
-             (amount (assoc-default 'amount duration))
-             (unit (assoc-default 'unit duration))
-             (start-str (org-todoist-org-element-to-string sch))
-             (start-time (org-time-string-to-time start-str))
-             (seconds (pcase unit
-                       ("minute" (* amount 60))
-                       ("hour" (* amount 3600))
-                       ("day" (* amount 86400))
-                       (_ 0)))
-             (end-time (time-add start-time (seconds-to-time seconds)))
-             (end-str (format-time-string "%Y-%m-%d %H:%M" end-time))
-             (range-str (format "%s--<%s>" start-str end-str)))
-        (setq sch (org-timestamp-from-string range-str))))
+                  (amount (assoc-default 'amount duration))
+                  (unit (assoc-default 'unit duration))
+                  (start-str (org-todoist-org-element-to-string sch))
+                  (start-time (org-time-string-to-time start-str))
+                  (seconds (pcase unit
+                             ("minute" (* amount 60))
+                             ("hour" (* amount 3600))
+                             ("day" (* amount 86400))
+                             (_ 0)))
+                  (end-time (time-add start-time (seconds-to-time seconds)))
+                  (end-str (format-time-string "%Y-%m-%d %H:%M" end-time))
+                  (range-str (format "%s--<%s>" start-str end-str))
+                  (ts (org-timestamp-from-string range-str)))
+        (when (eql (org-element-property :day-end ts)
+                   (org-element-property :day-start ts))
+          (org-element-put-property ts :range-type 'time-range)
+          (org-element-put-property ts :raw-value nil))
+        (setq sch ts)))
     (when sch (setq props (plist-put props :scheduled sch)))
     (when dead (setq props (plist-put props :deadline dead)))
     (when closed (setq props (plist-put props :closed closed)))
@@ -2077,9 +2098,9 @@ Note, a \n character is appended if not present."
   "Sync with a full reset token and overwrite the SYNC-BUFFER.
 `ARG' is passed to `org-todoist--do-sync'."
   (let ((sb (org-todoist--storage-file org-todoist--sync-buffer-file)))
-  (when (file-exists-p sb)
-    (copy-file sb (org-todoist-file) t))
-  (org-todoist--do-sync "*" (null ARG))))
+    (when (file-exists-p sb)
+      (copy-file sb (org-todoist-file) t))
+    (org-todoist--do-sync "*" (null ARG))))
 
 (defun org-todoist--verify-changes-before-reset (&optional ARG)
   "Verify changes with user before performing a full sync reset.
@@ -2176,7 +2197,7 @@ Example: 'Submit report by tomorrow 5pm p2'"
                      (read-string "Reminder time (empty for none): ")))
   (unless org-todoist-api-token
     (user-error "Please set org-todoist-api-token"))
-  
+
   (let* ((url-request-method "POST")
          (url-request-extra-headers
           `(("Content-Type" . "application/json")
@@ -2244,7 +2265,7 @@ Includes last request, response, diff, and push information."
       (erase-buffer)
       (org-mode)
 
-      ;; API Version Warning  
+      ;; API Version Warning
       (when (or (null org-todoist-api-version) (eq org-todoist-api-version 'sync-v9))
         (insert "*WARNING:* Using deprecated Todoist Sync API v9\n"
                 "Migrate to Unified API v1 with:\n"

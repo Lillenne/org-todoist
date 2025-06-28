@@ -12,7 +12,7 @@ An Emacs package for bidirectional incremental sync of [[https://orgmode.org/][O
   - Cancel by changing TODO state
   - Scheduling
   - Deadlines
-  - Effort/Duration
+  - Duration (as effort or time-range)
   - Priority
   - Descriptions
   - Tags/Labels
@@ -60,7 +60,7 @@ To automatically sync at a given interval, unless the ~org-todoist-file~ is visi
 | Plain-text under headline | Description                 |
 | Scheduled                 | Due                         |
 | Deadline                  | Deadline                    |
-| Effort                    | Duration                    |
+| Effort OR Scheduled       | Duration                    |
 | Priority                  | Priority                    |
 | Todo-state + Todo-keyword | Checked, Deleted            |
 | Tags (+inherited)         | Labels                      |
@@ -78,7 +78,7 @@ Simply create org headlines! The corresponding Todoist types (projects, subproje
 |  TODO | Task                  |
 
 ** Updating projects, sections, and tasks
-Updating items happens automatically when updating any headline, description, todo-state, todo-keyword[fn:4], priority, effort, tag, scheduled time, deadline time, or assignee OR when any project, section, or task is moved under another headline. /This works with standard org commands (e.g., ~org-refile~)./
+Updating items happens automatically when updating any headline, description, todo-state, todo-keyword[fn:4], priority, effort, tag, scheduled time / range, deadline time, or assignee OR when any project, section, or task is moved under another headline. /This works with standard org commands (e.g., ~org-refile~)./
 ** Deleting items
 When the ~org-todoist-delete-remote-items~ variable is non-nil, removing items from the ~org-todoist-file~ (via deletion or refiling) will cause them to be deleted from Todoist. Additionally, items can be deleted by changing their ~todo-keyword~ to the ~org-todoist-deleted-keyword~.
 ** Tags, labels, and archiving
