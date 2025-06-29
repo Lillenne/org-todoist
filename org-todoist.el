@@ -856,7 +856,8 @@ pretty-printed JSON commands."
     (erase-buffer)
     (insert (json-encode commands))
     (json-pretty-print-buffer)
-    (goto-char (point-min)))
+    (goto-char (point-min))
+    (when (fboundp 'json-mode) (json-mode)))
   (message "Commands (as JSON) written to *todoist-push-test*"))
 
 (defun org-todoist--timestamp-from-start (TIMESTAMP)
@@ -2653,9 +2654,7 @@ Local changes that haven't been synced will be preserved during reset."
     ("q" "Quick Task" org-todoist-quick-task)
     ("s" "Sync" org-todoist-sync)
     ("e" "Compare with Ediff" org-todoist-ediff-snapshot)
-    ("r" "Force Full Reset" org-todoist--reset)
-    ("b" "Start background sync" org-todoist-background-sync)
-    ("B" "Stop background sync" org-todoist-cancel-background-sync)]
+    ("r" "Force Full Reset" org-todoist--reset)]
    ["View"
     ("m" "My tasks" org-todoist-my-tasks)
     ("x" "Last quick task" org-todoist-open-last-quick-task-in-app)
@@ -2668,6 +2667,8 @@ Local changes that haven't been synced will be preserved during reset."
     ("i" "Ignore Subtree" org-todoist-ignore-subtree)
     ("a" "Add Subproject" org-todoist-add-subproject)]
    ["Quick Config"
+    ("b" "Start background sync" org-todoist-background-sync)
+    ("B" "Stop background sync" org-todoist-cancel-background-sync)
     ("K" "Toggle delete remote items" org-todoist-toggle-remote-deletion)]
    ["Diagnostics"
     ("D" "Show Diagnostics" org-todoist-diagnose)
