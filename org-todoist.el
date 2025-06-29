@@ -2405,7 +2405,8 @@ Includes last request, response, diff, and push information."
   "Cancel sync with Todoist servers in the background."
   (interactive)
   (when org-todoist--background-timer
-    (cancel-timer org-todoist--background-timer)))
+    (cancel-timer org-todoist--background-timer)
+    (setq org-todoist--background-timer nil)))
 
 ;;;###autoload
 (defun org-todoist-background-sync ()
@@ -2610,10 +2611,44 @@ Local changes that haven't been synced will be preserved during reset."
 
 (require 'transient)
 
+(defface org-todoist-enabled-face
+  '((t (:foreground "#009900" :weight bold)))
+  "Face for enabled todoist features in transient menu")
+
+(defface org-todoist-danger-face
+  '((t (:foreground "#cc0000" :weight bold)))
+  "Face for dangerous todoist operations in transient menu")
+
+
+(defface org-todoist-disabled-face
+  '((t (:foreground "#8b0000" :weight bold)))
+  "Face for disabled todoist features in transient menu")
+
+(defun org-todoist--remote-deletion-display ()
+  (format "Delete Remote Items: %s" (if org-todoist-delete-remote-items
+                                      (propertize "Enabled" 'face 'org-todoist-danger-face)
+                                    (propertize "Disabled" 'face 'org-todoist-enabled-face))))
+
+(defun org-todoist--background-sync-enabled-display ()
+  (format "Background Sync: %s" (if org-todoist--background-timer
+                                  (propertize "Enabled" 'face 'org-todoist-enabled-face)
+                                (propertize "Disabled" 'face 'org-todoist-disabled-face))))
+
+(defun org-todoist--background-sync-display ()
+  (format "Background Sync: Every %d minutes" (/ org-todoist-background-sync-interval 60)))
+
 ;;;; Transient interface
 ;;;###autoload
 (transient-define-prefix org-todoist-dispatch ()
   "Org-Todoist interactive interface"
+  [["Org-Todoist"
+    (:info (format "API Version: %s" (propertize (symbol-name (or org-todoist-api-version 'sync-v9)) 'face
+                                                 (if (eq org-todoist-api-version 'unified-v1)
+                                                     'org-todoist-enabled-face
+                                                   'org-todoist-disabled-face))))
+    (:info #'org-todoist--remote-deletion-display)
+    (:info #'org-todoist--background-sync-enabled-display)
+    (:info #'org-todoist--background-sync-display)]]
   [["Sync Operations"
     ("q" "Quick Task" org-todoist-quick-task)
     ("s" "Sync" org-todoist-sync)
@@ -2624,7 +2659,8 @@ Local changes that haven't been synced will be preserved during reset."
    ["View"
     ("m" "My tasks" org-todoist-my-tasks)
     ("x" "Last quick task" org-todoist-open-last-quick-task-in-app)
-    ("G" "Show assignees" org-todoist-show-all-assignees)]
+    ("G" "Show assignees" org-todoist-show-all-assignees)
+    ("o" "Open in Todoist" org-todoist-xdg-open)]
    ["Item Actions"
     ("g" "Assign" org-todoist-assign-task)
     ("u" "Unassign" org-todoist-unassign-task)
@@ -2632,7 +2668,7 @@ Local changes that haven't been synced will be preserved during reset."
     ("i" "Ignore Subtree" org-todoist-ignore-subtree)
     ("a" "Add Subproject" org-todoist-add-subproject)]
    ["Quick Config"
-    ("D" "Toggle delete remote items" org-todoist-toggle-remote-deletion)]
+    ("K" "Toggle delete remote items" org-todoist-toggle-remote-deletion)]
    ["Diagnostics"
     ("D" "Show Diagnostics" org-todoist-diagnose)
     ("P" "Test Push Commands" org-todoist--push-test)
