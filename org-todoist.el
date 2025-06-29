@@ -119,6 +119,11 @@ nil=do not adjust folds
 
 (defvar org-todoist-deleted-keyword "CANCELED" "TODO keyword for deleted Todoist tasks.")
 
+(defvar org-todoist-command-batch-size 75
+  "The number of commands to send in a single Todoist sync request.
+The official limit is 100, but this can be set lower to avoid issues.
+100 caused 503 errors during development, so it is set to 75 by default.")
+
 (defvar org-todoist-duration-as-timestamp nil
   "If non-nil, use timestamp for duration instead of effort.")
 
@@ -570,6 +575,7 @@ the Todoist project, section, and optionally parent task."
                   'silent
                   'inhibit-cookies)))
 
+;; TODO add a sync override parameter for requests that need batching and use url-retrieve-synchronously and give the user a sassy message. AI!
 (defun org-todoist--api-call (request-data callback-fn &optional callback-args)
   "Make an API call to Todoist sync endpoint.
 `request-data' is an alist of request parameters.
@@ -601,27 +607,65 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
   (setq org-todoist--sync-err nil)
   (let* ((cur-marker (point-marker))
          (ast (org-todoist--file-ast))
+         (commands (if (equal TOKEN "*")
+                       ;; For reset syncs, don't send any commands to preserve local changes
+                       []
+                     ;; Normal sync - diff against last state
+                     (let ((old (org-todoist--get-last-sync-buffer-ast)))
+                       (org-todoist--push ast old))))
          (request-data `(("sync_token" . ,TOKEN)
                          ("resource_types" . ,(json-encode org-todoist-resource-types))
-                         ("commands" . ,(if (equal TOKEN "*")
-                                            ;; For reset syncs, don't send any commands to preserve local changes
-                                            []
-                                          ;; Normal sync - diff against last state
-                                          (let ((old (org-todoist--get-last-sync-buffer-ast)))
-                                            (org-todoist--push ast old)))))))
+                         ("commands" . ,commands))))
     (message (if OPEN "Syncing with todoist. Buffer will open when sync is complete..." "Syncing with todoist. This may take a moment..."))
-    (org-todoist--api-call
-     request-data
-     (lambda (response open ast cur-marker)
-       (when (and (equal TOKEN "*")
-                  (eq (assoc-default 'full_sync response) :json-false))
-         (setq org-todoist--sync-err "Full sync failed - Todoist returned full_sync=false")
-         (error org-todoist--sync-err))
-       (if open
-           (progn (org-todoist--do-sync-callback response ast cur-marker)
-                  (find-file (org-todoist-file)))
-         (save-current-buffer (org-todoist--do-sync-callback response ast cur-marker))))
-     `(,OPEN ,ast ,cur-marker))))
+    (if (equal TOKEN "*")
+        ;; For full resets, don't batch - just send one request
+        (org-todoist--api-call
+         request-data
+         (lambda (response open ast cur-marker)
+           (when (and (equal TOKEN "*")
+                      (eq (assoc-default 'full_sync response) :json-false))
+             (error (setq org-todoist--sync-err "Full sync failed - Todoist returned full_sync=false")))
+           (if open
+               (progn (org-todoist--do-sync-callback response ast cur-marker)
+                      (find-file (org-todoist-file)))
+             (save-current-buffer (org-todoist--do-sync-callback response ast cur-marker))))
+         `(,OPEN ,ast ,cur-marker))
+      ;; For normal syncs, batch the commands
+      (let ((batches (when commands (org-todoist--batch-commands commands))))
+        (if (not batches)
+            ;; No commands to send - just do a normal sync
+            (org-todoist--api-call
+             request-data
+             (lambda (response open ast cur-marker)
+               (if open
+                   (progn (org-todoist--do-sync-callback response ast cur-marker)
+                          (find-file (org-todoist-file)))
+                 (save-current-buffer (org-todoist--do-sync-callback response ast cur-marker))))
+             `(,OPEN ,ast ,cur-marker))
+          ;; Process batches sequentially
+          (cl-labels ((process-batch (batches-left sync-token temp-id-map)
+                        (when batches-left
+                          (let* ((current-batch (car batches-left))
+                                 (batch-request-data `(("sync_token" . ,sync-token)
+                                                       ("resource_types" . ,(json-encode org-todoist-resource-types))
+                                                       ("commands" . ,(org-todoist--replace-temp-ids current-batch temp-id-map)))))
+                            (message "Sending batch %s" (length batches-left))
+                            (org-todoist--api-call
+                             batch-request-data
+                             (lambda (response _ ast _)
+                               (if (null response)
+                                   (message "Batch failed. See org-todoist--sync-err for details.")
+                                 (when-let* ((parsed (org-todoist--parse-response response ast))
+                                             (new-token (assoc-default 'sync_token response))
+                                             (new-temp-ids (assoc-default 'temp_id_mapping response)))
+                                   (if (cdr batches-left)
+                                       (progn
+                                         (message "Batch complete. %d remaining..." (length (cdr batches-left)))
+                                         (process-batch (cdr batches-left) new-token (append temp-id-map new-temp-ids)))
+                                     (message "Sync complete.")))))
+                             `(,OPEN ,ast ,cur-marker))))))
+            (process-batch batches TOKEN nil)
+            (org-todoist--handle-display cur-marker)))))))
 
 (defun org-todoist--do-sync-callback (response ast cur-marker)
   "The callback to invoke after syncing with the Todoist API.
@@ -1250,7 +1294,21 @@ instead of id."
                               ("type" . "project_delete")
                               ("args" . (("id" . ,id))))
                             commands)))))))))))
-    (nreverse commands)))
+
+    ;; Since commands may be batched, we need to ensure that new items are always added first.
+    (let ((sorted-commands
+           (append
+            ;; Project adds first
+            (--filter (string= "project_add" (assoc-default 'type it)) commands)
+            ;; Section adds second  
+            (--filter (string= "section_add" (assoc-default 'type it)) commands)
+            ;; Item adds third
+            (--filter (string= "item_add" (assoc-default 'type it)) commands)
+            ;; All other commands last
+            (--filter (not (member (assoc-default 'type it)
+                                 '("project_add" "section_add" "item_add")))
+                     commands))))
+      sorted-commands)))
 
 (defun org-todoist--is-subtask (NODE)
   "If `NODE' is a headline representings a substask."
@@ -2157,6 +2215,29 @@ After user confirms, performs an incremental sync first, then full reset."
       (message "Resetting...")
       (org-todoist--do-reset ARG))))
 
+(defun org-todoist--batch-commands (commands)
+  "Split COMMANDS into chunks of `org-todoist-command-batch-size'."
+  (let ((max-batch-size org-todoist-command-batch-size))
+    (cl-loop for i from 0 to (length commands) by max-batch-size
+             collect (seq-subseq commands i (min (+ i max-batch-size) (length commands))))))
+
+(defun org-todoist--replace-temp-ids (commands temp-id-map)
+  "Replace temporary IDs in COMMANDS with real IDs from TEMP-ID-MAP."
+  (cl-loop for cmd in commands collect
+           (cl-loop for (key . value) in cmd
+                    if (eq key 'args)
+                    collect (cons key (org-todoist--map-replace-temp-ids value temp-id-map))
+                    else collect (cons key value))))
+
+(defun org-todoist--map-replace-temp-ids (args temp-id-map)
+  "Recursively replace temp IDs in ARGS using TEMP-ID-MAP."
+  (cl-loop for (k . v) in args
+           collect (cons k (if (stringp v)
+                               (or (cdr (assoc v temp-id-map)) v)
+                             (if (listp v)
+                                 (org-todoist--map-replace-temp-ids v temp-id-map)
+                               v)))))
+
 (defun org-todoist--id-is-v9 (id)
   "String `ID' contains only numbers."
   (string-match-p "^[0-9]+$" id))
@@ -2627,13 +2708,13 @@ Local changes that haven't been synced will be preserved during reset."
 
 (defun org-todoist--remote-deletion-display ()
   (format "Delete Remote Items: %s" (if org-todoist-delete-remote-items
-                                      (propertize "Enabled" 'face 'org-todoist-danger-face)
-                                    (propertize "Disabled" 'face 'org-todoist-enabled-face))))
+                                        (propertize "Enabled" 'face 'org-todoist-danger-face)
+                                      (propertize "Disabled" 'face 'org-todoist-enabled-face))))
 
 (defun org-todoist--background-sync-enabled-display ()
   (format "Background Sync: %s" (if org-todoist--background-timer
-                                  (propertize "Enabled" 'face 'org-todoist-enabled-face)
-                                (propertize "Disabled" 'face 'org-todoist-disabled-face))))
+                                    (propertize "Enabled" 'face 'org-todoist-enabled-face)
+                                  (propertize "Disabled" 'face 'org-todoist-disabled-face))))
 
 (defun org-todoist--background-sync-display ()
   (format "Background Sync: Every %d minutes" (/ org-todoist-background-sync-interval 60)))
