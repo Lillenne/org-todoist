@@ -2289,10 +2289,22 @@ After user confirms, performs an incremental sync first, then full reset."
   (org-map-entries #'org-todoist-show-assignee))
 
 ;;;###autoload
+(defun org-todoist-capture-task ()
+  "Capture a new task in Todoist using org-capture."
+  (interactive)
+  (unless org-todoist-api-token
+    (user-error "Please set org-todoist-api-token"))
+  (let ((org-capture-templates
+         '(("t" "Task" entry (function org-todoist-find-project-and-section)
+            "* TODO %^{What is the task} %^G %^{EFFORT}p %(org-todoist-assign-task) %(progn (org-schedule nil) nil) %(progn (org-deadline nil) nil)\n%?")
+           ("n" "Project Notes" entry (function org-todoist-project-notes) "* %?"))))
+    (org-capture nil)))
+
+;;;###autoload
 (defun org-todoist-quick-task (task-text note reminder)
   "Create a task in Todoist using natural language processing.
 TASK-TEXT should be a natural language task description with optional due date.
-Example: 'Submit report by tomorrow 5pm p2'"
+Example: \"Submit report by tomorrow 5pm p2\""
   (interactive (list (read-string "Task text: ")
                      (read-string "Comment (empty for none): ")
                      (read-string "Reminder time (empty for none): ")))
@@ -2326,6 +2338,32 @@ Example: 'Submit report by tomorrow 5pm p2'"
   "Create a todoist link for `ID'."
   (concat "todoist://task?id=" ID))
 
+;;;###autoload
+(defun org-todoist-xdg-open-project ()
+  "Open a Todoist project in the desktop app."
+  (interactive)
+  (let* ((projects (org-todoist--project-nodes (org-todoist--file-ast)))
+         (project-names (--map (org-element-property :raw-value it) projects))
+         (selected (completing-read "Open project: " project-names))
+         (id (org-todoist--get-prop (--first (string= selected (org-element-property :raw-value it)) projects)
+                                    org-todoist--id-property)))
+    (browse-url-xdg-open (format "todoist://project?id=%s" id))))
+
+;;;###autoload
+(defun org-todoist-xdg-open-quickadd ()
+  "Open Todoist quick add panel in desktop app."
+  ;; TODO not working with linux appimage?
+  (interactive)
+  (browse-url-xdg-open "todoist://openquickadd"))
+
+(defun org-todoist-xdg-open-search-query (QUERY)
+  "Open a search in Todoist with `QUERY'."
+  (interactive "sQuery: ")
+  (browse-url-xdg-open (if (string-blank-p QUERY)
+                           "todoist://search"
+                         (concat "todoist://search?query=" QUERY))))
+
+;;;###autoload
 (defun org-todoist-open-last-quick-task-in-app ()
   "Xdg-open the last quick task url."
   (interactive)
@@ -2340,63 +2378,58 @@ Example: 'Submit report by tomorrow 5pm p2'"
   (if (and (equal (org-todoist-file) (buffer-file-name))
            (equal (org-entry-get nil org-todoist--type) org-todoist--task-type))
       (browse-url-xdg-open (org-todoist--create-link (org-entry-get nil org-todoist--id-property)))
-    (org-todoist-xdg-open-search)))
+    (org-todoist-xdg-open-task-search)))
 
-(defun org-todoist-xdg-open-search ()
+;;;###autoload
+(defun org-todoist-xdg-open-task-search ()
   "Quickly select a project, section, or task and open in Todoist app.
 Uses built-in completion without external dependencies."
   (interactive)
-  (unless (string= (buffer-file-name) (org-todoist-file))
-    (find-file (org-todoist-file)))
-  
-  (let* ((items (--filter it (org-map-entries
-                              (lambda ()
-                                (when (equal org-todoist--task-type (org-entry-get nil org-todoist--type))
-                                  (let* ((id (org-entry-get nil org-todoist--id-property))
-                                         (title (org-entry-get nil "ITEM"))
-                                         (assignee (org-entry-get nil "RESPONSIBLE_UID"))
-                                         (project (org-element-property :raw-value
-                                                                        (org-todoist--get-parent-of-type org-todoist--project-type (org-element-at-point) t)))
-                                         (section (org-element-property :raw-value
-                                                                        (org-todoist--get-parent-of-type org-todoist--section-type (org-element-at-point) t)))
-                                         (todo-state (org-entry-get nil "TODO"))
-                                         (priority (org-entry-get nil "PRIORITY"))
-                                         (effort (org-entry-get nil "EFFORT"))
-                                         (is-done (member todo-state `(,org-todoist-done-keyword ,org-todoist-deleted-keyword))))
+  (let* ((items (with-current-buffer (find-file-noselect (org-todoist-file))
+                  (goto-char (point-min))
+                  (--filter it (org-map-entries
+                                (lambda ()
+                                  (when (equal org-todoist--task-type (org-entry-get nil org-todoist--type))
+                                    (let* ((id (org-entry-get nil org-todoist--id-property))
+                                           (title (org-entry-get nil "ITEM"))
+                                           (assignee (org-entry-get nil "RESPONSIBLE_UID"))
+                                           (project (org-element-property :raw-value
+                                                                          (org-todoist--get-parent-of-type org-todoist--project-type (org-element-at-point) t)))
+                                           (section (org-element-property :raw-value
+                                                                          (org-todoist--get-parent-of-type org-todoist--section-type (org-element-at-point) t)))
+                                           (todo-state (org-entry-get nil "TODO"))
+                                           (priority (org-entry-get nil "PRIORITY"))
+                                           (effort (org-entry-get nil "EFFORT"))
+                                           (is-done (member todo-state `(,org-todoist-done-keyword ,org-todoist-deleted-keyword))))
 
-                                    (cons
-                                     (s-join " "
-                                             `(,(propertize project 'face 'org-level-1)
-                                               "•"
-                                               ,(propertize (or section org-todoist--default-section-name) 'face 'org-level-2)
-                                               "•"
-                                               ,(when priority
-                                                  (propertize (format "[#%s]" priority) 'face 'org-priority))
-                                               ,(propertize todo-state 'face (if is-done 'shadow 'org-todo))
-                                               ,(if is-done
-                                                    (propertize title 'face 'shadow)
-                                                  title)
+                                      (cons
+                                       (s-join " "
+                                               `(,(propertize project 'face 'org-level-1)
+                                                 "•"
+                                                 ,(propertize (or section org-todoist--default-section-name) 'face 'org-level-2)
+                                                 "•"
+                                                 ,(when priority
+                                                    (propertize (format "[#%s]" priority) 'face 'org-priority))
+                                                 ,(propertize todo-state 'face (if is-done 'shadow 'org-todo))
+                                                 ,(if is-done
+                                                      (propertize title 'face 'shadow)
+                                                    title)
 
-                                               ,(when assignee
-                                                  (propertize (format "(@%s)" (org-element-property :raw-value
-                                                                                                    (org-todoist--get-by-id org-todoist--collaborator-type assignee (org-todoist--file-ast))))
-                                                              'face 'org-link))
-                                               ,(when effort
-                                                  (propertize (format "(%s)" effort) 'face 'org-special-keyword))))
-                                     id)
-                                    ))))))
+                                                 ,(when assignee
+                                                    (propertize (format "(@%s)" (org-element-property :raw-value
+                                                                                                      (org-todoist--get-by-id org-todoist--collaborator-type assignee (org-todoist--file-ast))))
+                                                                'face 'org-link))
+                                                 ,(when effort
+                                                    (propertize (format "(%s)" effort) 'face 'org-special-keyword))))
+                                       id)
+                                      )))))))
          (selection (completing-read "Select Todoist item: " items))
          (id (cdr (assoc selection items))))
-    
+
     (when id
       (browse-url-xdg-open (org-todoist--create-link id)))))
 
-(defun testme ()
-  (interactive)
-  (find-file (org-todoist-file))
-  (advice-add #'consult-org-heading :after #'org-todoist-xdg-open)
-  (consult-org-heading))
-
+;;;###autoload
 (defun org-todoist-report-bug ()
   "Report a bug with org-todoist.
 Generates diagnostics, exports to GitHub Flavored Markdown, copies to clipboard,
@@ -2518,7 +2551,15 @@ Includes last request, response, diff, and push information."
     (setq org-todoist--background-timer
           (run-at-time org-todoist-background-sync-offset
                        org-todoist-background-sync-interval
-                       #'org-todoist-background-sync))))
+                       #'org-todoist---sync))))
+
+;;;###autoload
+(defun org-todoist-toggle-background-sync ()
+  "Toggle background sync."
+  (interactive)
+  (if org-todoist--background-timer
+      (org-todoist-cancel-background-sync)
+    (org-todoist-background-sync)))
 
 ;;;###autoload
 (defun org-todoist-unassign-task ()
@@ -2656,6 +2697,14 @@ With prefix `ARG', include unassigned tasks.
         (org-tags-view nil (concat "+TODOIST_TYPE={TASK}+responsible_uid={" USER "}|+TODOIST_TYPE={TASK}-responsible_uid"))
       (org-tags-view nil (concat "+TODOIST_TYPE={TASK}+responsible_uid={" USER "}")))))
 
+;;;###autoload
+(defun org-todoist-view-user-tasks (USER)
+  "View tasks assigned to `USER' in the org-todoist file."
+  (interactive (list (org-todoist--get-prop (org-todoist--select-user "View tasks for user: ") org-todoist--id-property)))
+  (let ((org-agenda-files (list (org-todoist-file)))
+        (org-todoist-my-id USER))
+    (org-todoist-my-tasks current-prefix-arg USER)))
+
 ;;;###autoload 
 (defun org-todoist-ediff-snapshot ()
   "Compare current org-todoist file with last synced snapshot using ediff."
@@ -2711,71 +2760,152 @@ Local changes that haven't been synced will be preserved during reset."
       (delete-file (org-todoist-file)))
     (org-todoist--do-reset ARG)))
 
+;;;###autoload
+(defun org-todoist-goto ()
+  "Jump to the org todoist file."
+  (interactive)
+  (let ((file (org-todoist-file)))
+    (unless (or (not (file-exists-p file))
+                (equal (buffer-file-name) file))
+      (find-file file))))
+
+;; Transient interface and display functions
 (require 'transient)
+
+(defface org-todoist-title-face
+  '((t (:foreground "#E44232" :weight bold :height 1.2)))
+  "")
+
+(defface org-todoist-heading-face
+  '((t (:foreground "#E44232")))
+  "")
+
+(defface org-todoist-red-face
+  '((t (:foreground "#E44232")))
+  "")
+
+(defface org-todoist-gray-face
+  '((t (:foreground "#1E1E1E")))
+  "")
+
+(defface org-todoist-beige-face
+  '((t (:foreground "#FFF9F3")))
+  "")
 
 (defface org-todoist-enabled-face
   '((t (:foreground "#009900" :weight bold)))
   "Face for enabled todoist features in transient menu")
 
-(defface org-todoist-danger-face
-  '((t (:foreground "#cc0000" :weight bold)))
-  "Face for dangerous todoist operations in transient menu")
-
-
-(defface org-todoist-disabled-face
-  '((t (:foreground "#8b0000" :weight bold)))
-  "Face for disabled todoist features in transient menu")
-
 (defun org-todoist--remote-deletion-display ()
   (format "Delete Remote Items: %s" (if org-todoist-delete-remote-items
-                                        (propertize "Enabled" 'face 'org-todoist-danger-face)
-                                      (propertize "Disabled" 'face 'org-todoist-enabled-face))))
+                                        (propertize "Enabled" 'face 'org-todoist-enabled-face)
+                                      (propertize "Disabled" 'face 'org-todoist-red-face))))
 
 (defun org-todoist--background-sync-enabled-display ()
   (format "Background Sync: %s" (if org-todoist--background-timer
                                     (propertize "Enabled" 'face 'org-todoist-enabled-face)
-                                  (propertize "Disabled" 'face 'org-todoist-disabled-face))))
+                                  (propertize "Disabled" 'face 'org-todoist-red-face))))
 
 (defun org-todoist--background-sync-display ()
-  (format "Background Sync: Every %d minutes" (/ org-todoist-background-sync-interval 60)))
+  "Display the current background sync interval."
+  (let* ((seconds org-todoist-background-sync-interval)
+         (unit (cond
+                ((< seconds 60) (cons seconds "seconds"))
+                ((< seconds 3600) (cons (/ seconds 60) "minutes"))
+                ((< seconds 86400) (cons (/ seconds 3600) "hours"))
+                (t (cons (/ seconds 86400) "days")))))
+    (format "Background Sync: Every %s %s"
+            (propertize (format "%d" (car unit)) 'face (if org-todoist--background-timer
+                                                           'org-todoist-enabled-face
+                                                         'org-todoist-red-face))
+            (cdr unit))))
+
+(defun org-todoist--api-version-display ()
+  (format "API Version: %s" (let ((str (propertize (symbol-name (or org-todoist-api-version 'sync-v9)) 'face
+                                                   (if (eq org-todoist-api-version 'unified-v1)
+                                                       'org-todoist-enabled-face
+                                                     'org-todoist-red-face))))
+                              (if (eq org-todoist-api-version 'unified-v1)
+                                  str
+                                (concat str " "
+                                        (propertize "[DEPRECATED! Press to migrate]" 'face '(:inherit shadow :weight bold)))))))
+
+
+(transient-define-suffix org-todoist-toggle-remote-deletion-suffix ()
+  :transient t
+  :key "K"
+  :description #'org-todoist--remote-deletion-display
+  (interactive)
+  (org-todoist-toggle-remote-deletion))
+
+(transient-define-suffix org-todoist-toggle-background-sync-suffix ()
+  :transient t
+  :key "B"
+  :description #'org-todoist--background-sync-enabled-display
+  (interactive)
+  (org-todoist-toggle-background-sync))
+
+(transient-define-suffix org-todoist--api-version-suffix ()
+  :transient t
+  :key "V"
+  :description #'org-todoist--api-version-display
+  (interactive)
+  (if (eq org-todoist-api-version 'unified-v1)
+      (message "You are already using the most recent API version.")
+    (org-todoist-migrate-to-v1)))
+
+(transient-define-suffix org-todoist--background-sync-interval-suffix ()
+  :transient t
+  :key "I"
+  :description #'org-todoist--background-sync-display
+  (interactive)
+  (let ((new-interval (read-number "Set background sync interval (in seconds): " org-todoist-background-sync-interval)))
+    (setq org-todoist-background-sync-interval new-interval)
+    (when org-todoist--background-timer
+      (cancel-timer org-todoist--background-timer)
+      (setq org-todoist--background-timer nil))
+    (org-todoist-background-sync)))
 
 ;;;; Transient interface
 ;;;###autoload
 (transient-define-prefix org-todoist-dispatch ()
   "Org-Todoist interactive interface"
-  [["Org-Todoist"
-    (:info (format "API Version: %s" (propertize (symbol-name (or org-todoist-api-version 'sync-v9)) 'face
-                                                 (if (eq org-todoist-api-version 'unified-v1)
-                                                     'org-todoist-enabled-face
-                                                   'org-todoist-disabled-face))))
-    (:info #'org-todoist--remote-deletion-display)
-    (:info #'org-todoist--background-sync-enabled-display)
-    (:info #'org-todoist--background-sync-display)]]
-  [["Sync Operations"
-    ("q" "Quick Task" org-todoist-quick-task)
-    ("s" "Sync" org-todoist-sync)
-    ("e" "Compare with Ediff" org-todoist-ediff-snapshot)
-    ("r" "Force Full Reset" org-todoist--reset)]
-   ["View"
-    ("m" "My tasks" org-todoist-my-tasks)
-    ("x" "Last quick task" org-todoist-open-last-quick-task-in-app)
-    ("G" "Show assignees" org-todoist-show-all-assignees)
-    ("o" "Open in Todoist" org-todoist-xdg-open)]
-   ["Item Actions"
-    ("g" "Assign" org-todoist-assign-task)
-    ("u" "Unassign" org-todoist-unassign-task)
-    ("t" "Tag user" org-todoist-tag-user)
-    ("i" "Ignore Subtree" org-todoist-ignore-subtree)
-    ("a" "Add Subproject" org-todoist-add-subproject)]
-   ["Quick Config"
-    ("b" "Start background sync" org-todoist-background-sync)
-    ("B" "Stop background sync" org-todoist-cancel-background-sync)
-    ("K" "Toggle delete remote items" org-todoist-toggle-remote-deletion)]
-   ["Diagnostics"
-    ("D" "Show Diagnostics" org-todoist-diagnose)
-    ("P" "Test Push Commands" org-todoist--push-test)
-    ("R" "Report Bug" org-todoist-report-bug)
-    ("M" "Migrate to V1 API" org-todoist-migrate-to-v1)]])
+  :refresh-suffixes t
+  [[:description (lambda () (propertize "Org-Todoist\n" 'face 'org-todoist-title-face))
+    :pad-keys t
+    (org-todoist--api-version-suffix)
+    (org-todoist-toggle-remote-deletion-suffix)
+    (org-todoist-toggle-background-sync-suffix)
+    (org-todoist--background-sync-interval-suffix)]]
+  [[:description (lambda () (propertize "Tasks" 'face 'org-todoist-heading-face))
+                 ("q" "Quick Task" org-todoist-quick-task)
+                 ("c" "Org Capture" org-todoist-capture-task)
+                 ("g" "Assign" org-todoist-assign-task)
+                 ("u" "Unassign" org-todoist-unassign-task)
+                 ("@" "Tag User" org-todoist-tag-user)]
+   [:description (lambda () (propertize "Sync Operations" 'face 'org-todoist-heading-face))
+                 ("s" "Sync" org-todoist-sync)
+                 ("e" "Ediff Changes" org-todoist-ediff-snapshot)
+                 ("r" "Force Reset" org-todoist--reset)]
+   [:description (lambda () (propertize "Org View" 'face 'org-todoist-heading-face))
+                 ("j" "Todoist File" org-todoist-goto)
+                 ("m" "My Tasks" org-todoist-my-tasks)
+                 ("u" "User's Tasks" org-todoist-view-user-tasks)
+                 ("G" "Show Assignees" org-todoist-show-all-assignees)]
+   [:description (lambda () (propertize "Item Actions" 'face 'org-todoist-heading-face))
+                 ("i" "Ignore Subtree" org-todoist-ignore-subtree)
+                 ("a" "Add Subproject" org-todoist-add-subproject)]
+   [:description (lambda () (propertize "Open in App" 'face 'org-todoist-heading-face))
+                 ("o" "Open Task" org-todoist-xdg-open)
+                 ("p" "Open Project" org-todoist-xdg-open-project)
+                 ;; ("q" "Open Quick Add" org-todoist-xdg-open-quickadd)
+                 ("/" "Open Search Query" org-todoist-xdg-open-search-query)
+                 ("x" "Last Quick Task" org-todoist-open-last-quick-task-in-app)]
+   [:description (lambda () (propertize "Diagnostics" 'face 'org-todoist-heading-face))
+                 ("D" "Show Diagnostics" org-todoist-diagnose)
+                 ("P" "Test Push Commands" org-todoist--push-test)
+                 ("R" "Report Bug" org-todoist-report-bug)
+                 ("M" "Migrate to V1 API" org-todoist-migrate-to-v1)]])
 
 (provide 'org-todoist)
 ;;; org-todoist.el ends here
