@@ -2279,7 +2279,7 @@ After user confirms, performs an incremental sync first, then full reset."
                 (point)))
          (ov (make-overlay pos pos)))
     (when name
-      (overlay-put ov 'after-string (propertize (concat "[" name "] ") 'face 'shadow))
+      (overlay-put ov 'after-string (propertize (concat "[@" name "] ") 'face 'org-todoist-beige-face))
       (overlay-put ov 'org-todoist-assignee-overlay t)
       (add-hook 'before-change-functions (lambda (&rest _) (delete-overlay ov)) nil t))))
 
@@ -2599,10 +2599,22 @@ Includes last request, response, diff, and push information."
 
 ;;;###autoload
 (defun org-todoist-unassign-task ()
-  "Unassign the task at point by setting the \"responsible_uid\" property to nil."
+  "Unassign task(s) at point or in region.
+When region is active, unassign all tasks in the region."
   (interactive)
-  (when (org-entry-get nil "responsible_uid")
-    (org-delete-property "responsible_uid")))
+  (if (use-region-p)
+      (save-excursion
+        (save-restriction
+          (narrow-to-region (region-beginning) (region-end))
+          (goto-char (point-min))
+          (let ((count 0))
+            (while (re-search-forward org-heading-regexp nil t)
+              (when (org-entry-get nil "responsible_uid")
+                (org-delete-property "responsible_uid")
+                (cl-incf count)))
+            (message "Unassigned %d tasks" count))))
+    (when (org-entry-get nil "responsible_uid")
+      (org-delete-property "responsible_uid"))))
 
 ;;;###autoload
 (defun org-todoist-ignore-subtree ()
@@ -2638,18 +2650,34 @@ to the `org-todoist--ignored-node-type'."
 
 ;;;###autoload
 (defun org-todoist-assign-task ()
-  "Prompt for collaborator selection and assign the task at point to them."
+  "Prompt for collaborator selection and assign task(s) at point.
+When region is active, assign all tasks in the region to the selected user."
   (interactive)
   (let ((can-assign (org-element-property :CAN_ASSIGN_TASKS
                                           (car (org-element-resolve-deferred
                                                 (org-todoist--get-parent-of-type org-todoist--project-type (org-element-at-point)))))))
     (if (and can-assign (not (equal "t" can-assign)))
         (user-error "Current project does not support task assignment!")
-      (let ((type (org-entry-get nil org-todoist--type)))
-        (if (and type (not (string= type org-todoist--task-type))) ; if there is no type, assume it is probably a new task.
-            (user-error "Can only assign users to task headlines")
-          (when-let ((selectedelement (org-todoist--select-user "Assign to: ")))
-            (org-set-property "responsible_uid" (org-todoist--get-prop selectedelement org-todoist--id-property))))))))
+      (when-let ((selectedelement (org-todoist--select-user "Assign to: ")))
+        (let ((uid (org-todoist--get-prop selectedelement org-todoist--id-property)))
+          (if (use-region-p)
+              (save-excursion
+                (save-restriction
+                  (narrow-to-region (region-beginning) (region-end))
+                  (goto-char (point-min))
+                  (let ((count 0))
+                    (while (re-search-forward org-heading-regexp nil t)
+                      (let ((type (org-entry-get nil org-todoist--type)))
+                        (when (or (null type) (string= type org-todoist--task-type))
+                          (org-set-property "responsible_uid" uid)
+                          (cl-incf count))))
+                    (message "Assigned %d tasks to %s"
+                             count
+                             (org-element-property :raw-value selectedelement)))))
+            (let ((type (org-entry-get nil org-todoist--type)))
+              (if (and type (not (string= type org-todoist--task-type)))
+                  (user-error "Can only assign users to task headlines")
+                (org-set-property "responsible_uid" uid)))))))))
 
 ;;;###autoload
 (defun org-todoist-migrate-to-v1 ()
