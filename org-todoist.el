@@ -212,7 +212,8 @@ this directory must be accessible on all PCs running the sync command.")
 
 (defun org-todoist--get-last-response ()
   "Get the contents of `org-todoist--last-response-file' as a pretty JSON string."
-  (when-let ((file (org-todoist--storage-file org-todoist--last-response-file)))
+  (when-let ((file (org-todoist--storage-file org-todoist--last-response-file))
+             (exists (file-exists-p file)))
     (with-temp-buffer (insert-file-contents file)
                       (json-pretty-print-buffer)
                       (buffer-string))))
@@ -224,7 +225,8 @@ this directory must be accessible on all PCs running the sync command.")
 
 (defun org-todoist--get-last-request ()
   "Store the last Todoist request `REQUEST' to a file."
-  (when-let ((file (org-todoist--storage-file org-todoist--last-request-file)))
+  (when-let ((file (org-todoist--storage-file org-todoist--last-request-file))
+             (exists (file-exists-p file)))
     (with-temp-buffer
       (insert-file-contents file)
       (let* ((decoded (url-unhex-string (buffer-substring-no-properties (point-min) (point-max))))
@@ -413,7 +415,8 @@ the Todoist project, section, and optionally parent task."
    ((eq org-todoist-api-version 'unified-v1)
     "https://api.todoist.com/api/v1/sync")
    ((or (eq org-todoist-api-version 'sync-v9) (null org-todoist-api-version))
-    "https://api.todoist.com/sync/v9/sync")))
+    (error "Sync API v9 is deprecated! Run 'org-todoist-migrate-to-v1' and set 'org-todoist-api-version' to 'unified-v1'"))))
+;; "https://api.todoist.com/sync/v9/sync")))
 
 (defun org-todoist--storage-file (FILE)
   "Determine full path of `FILE' relative to the `org-todoist-storage-dir'."
@@ -553,42 +556,56 @@ the Todoist project, section, and optionally parent task."
                (apply callback-fn (cons nil callback-args)))) ; Call with nil on error
            (kill-buffer (process-buffer process))))))))
 
-(defun org-todoist--api-call-url-retrieve (encoded-data callback-fn callback-args)
+(defun org-todoist--api-call-url-retrieve (encoded-data callback-fn callback-args &optional sync-request)
   "Make an API call using `url-retrieve'."
   (let ((url-request-method org-todoist-http-method)
         (url-request-extra-headers `(("Authorization" . ,(concat "Bearer " org-todoist-api-token))
                                      ("Content-Type" . ,org-todoist-request-type)))
         (url-request-data encoded-data))
-    (url-retrieve (org-todoist--sync-endpoint)
-                  (lambda (status)
-                    (if (plist-get status :error)
-                        (progn
-                          (setq org-todoist--sync-err (plist-get status :error))
-                          (apply callback-fn (cons nil callback-args))) ; Call with nil on error
-                      (with-current-buffer (current-buffer)
-                        (goto-char url-http-end-of-headers)
-                        (let* ((resp-str (decode-coding-region (point) (point-max) 'utf-8 t))
-                               (response (json-read-from-string resp-str)))
-                          (org-todoist--set-last-response resp-str)
-                          (apply callback-fn (cons response callback-args))))))
-                  nil
-                  'silent
-                  'inhibit-cookies)))
+    (if sync-request
+        (progn
+          (message "Warning: Synchronous API call may block Emacs UI. Use C-g to abort if needed.")
+          (condition-case err
+              (let ((response-buffer (url-retrieve-synchronously (org-todoist--sync-endpoint) 'silent 'inhibit-cookies)))
+                (with-current-buffer response-buffer
+                  (goto-char url-http-end-of-headers)
+                  (let* ((resp-str (decode-coding-region (point) (point-max) 'utf-8 t))
+                         (response (json-read-from-string resp-str)))
+                    (org-todoist--set-last-response resp-str)
+                    (apply callback-fn (cons response callback-args)))))
+            (error
+             (setq org-todoist--sync-err (format "url-retrieve-synchronously failed: %S" err))
+             (apply callback-fn (cons nil callback-args)))))
+      (url-retrieve (org-todoist--sync-endpoint)
+                    (lambda (status)
+                      (if (plist-get status :error)
+                          (progn
+                            (setq org-todoist--sync-err (plist-get status :error))
+                            (apply callback-fn (cons nil callback-args))) ; Call with nil on error
+                        (with-current-buffer (current-buffer)
+                          (goto-char url-http-end-of-headers)
+                          (let* ((resp-str (decode-coding-region (point) (point-max) 'utf-8 t))
+                                 (response (json-read-from-string resp-str)))
+                            (org-todoist--set-last-response resp-str)
+                            (apply callback-fn (cons response callback-args))))))
+                    nil
+                    'silent
+                    'inhibit-cookies))))
 
-;; TODO add a sync override parameter for requests that need batching and use url-retrieve-synchronously and give the user a sassy message. AI!
-(defun org-todoist--api-call (request-data callback-fn &optional callback-args)
+(defun org-todoist--api-call (request-data callback-fn &optional callback-args sync-request)
   "Make an API call to Todoist sync endpoint.
+SYNC-REQUEST forces synchronous execution and blocks Emacs. Use sparingly.
 `request-data' is an alist of request parameters.
 `callback-fn' is a function to call with the JSON response.
 `callback-args' are additional arguments for the callback.
 Uses `curl' if available, otherwise falls back to `url-retrieve'."
-  (when (eq org-todoist-api-version 'sync-v9)
+  (unless (eq org-todoist-api-version 'unified-v1)
     (if (file-exists-p (org-todoist-file))
         (user-error "Sync API v9 is deprecated! Run 'org-todoist-migrate-to-v1' and set 'org-todoist-api-version' to 'unified-v1'")
       (user-error "Sync API v9 is deprecated! Set 'org-todoist-api-version' to 'unified-v1'")))
   (let ((encoded-data (org-todoist--encode request-data)))
     (org-todoist--set-last-request encoded-data)
-    (if (executable-find "curl")
+    (if (and (not sync-request) (executable-find "curl"))
         (org-todoist--api-call-curl encoded-data callback-fn callback-args)
       (org-todoist--api-call-url-retrieve encoded-data callback-fn callback-args))))
 
@@ -2244,6 +2261,7 @@ After user confirms, performs an incremental sync first, then full reset."
 
 ;; User functions
 
+;;;###autoload
 (defun org-todoist-show-assignee ()
   "Display assigned collaborator's name as an overlay next to task at point."
   (interactive)
@@ -2262,6 +2280,7 @@ After user confirms, performs an incremental sync first, then full reset."
       (overlay-put ov 'org-todoist-assignee-overlay t)
       (add-hook 'before-change-functions (lambda (&rest _) (delete-overlay ov)) nil t))))
 
+;;;###autoload
 (defun org-todoist-show-all-assignees ()
   "Display assigned collaborators for all tasks in the current buffer."
   (interactive)
@@ -2314,6 +2333,7 @@ Example: 'Submit report by tomorrow 5pm p2'"
     (user-error "No previous quick task!"))
   (browse-url-xdg-open org-todoist--last-quick-task-url))
 
+;;;###autoload
 (defun org-todoist-xdg-open ()
   "Open task using xdg-open."
   (interactive)
@@ -2441,7 +2461,7 @@ Includes last request, response, diff, and push information."
                     "\n#+END_SRC")
           (insert (if (file-exists-p snapshot-file)
                       "No changes since last sync!"
-                    "No snapshot exists - perform a sync first"))))
+                    "No snapshot exists. Perform a sync first!"))))
       (insert "\n\n")
 
       ;; Push Test section
@@ -2620,7 +2640,7 @@ format used by API v1. This should only be run once. It requires
       ;; 4. Write updated AST to file
       (org-todoist--update-file ast)
       (message "Migration to API v1 complete. Your Todoist file has been updated with new IDs.
-You MUST set org-todoist-use-v1-api to 't' to continue using org-todoist without losing data!"))))
+You MUST set org-todoist-use-v1-api to 't' to continue using org-todoist!"))))
 
 ;;;###autoload
 (defun org-todoist-my-tasks (&optional ARG USER)
