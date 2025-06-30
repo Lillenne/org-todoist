@@ -2350,6 +2350,30 @@ Example: \"Submit report by tomorrow 5pm p2\""
     (browse-url-xdg-open (format "todoist://project?id=%s" id))))
 
 ;;;###autoload
+(defun org-todoist-jump-to-project (&optional arg)
+  "Select project and narrow to it in the Todoist buffer.
+With prefix arg when projectile is available, defaults to the current project."
+  (interactive "P")
+  (let* ((ast (org-todoist--file-ast))
+         (projects (org-todoist--project-nodes ast))
+         (project-names (--map (org-element-property :raw-value it) projects))
+         (selected-project (if (and arg 
+                                  (require 'projectile nil 'no-error)
+                                  (fboundp 'projectile-project-name))
+                               (if (string= (projectile-project-name) "-")
+                                   (completing-read "Which project? " project-names)
+                                 (projectile-project-name))
+                             (completing-read "Which project? " project-names)))
+         (selected-project-element (--first (string= (org-element-property :raw-value it) selected-project) projects)))
+    (when selected-project-element
+      (find-file (org-todoist-file))
+      (widen)
+      (goto-char (org-element-property :begin selected-project-element))
+      (org-narrow-to-subtree)
+      (org-fold-show-children)
+      (org-reveal))))
+
+;;;###autoload
 (defun org-todoist-xdg-open-quickadd ()
   "Open Todoist quick add panel in desktop app."
   ;; TODO not working with linux appimage?
@@ -2866,7 +2890,6 @@ Local changes that haven't been synced will be preserved during reset."
       (setq org-todoist--background-timer nil))
     (org-todoist-background-sync)))
 
-;;;; Transient interface
 ;;;###autoload
 (transient-define-prefix org-todoist-dispatch ()
   "Org-Todoist interactive interface"
@@ -2888,7 +2911,8 @@ Local changes that haven't been synced will be preserved during reset."
                  ("e" "Ediff Changes" org-todoist-ediff-snapshot)
                  ("r" "Force Reset" org-todoist--reset)]
    [:description (lambda () (propertize "Org View" 'face 'org-todoist-heading-face))
-                 ("j" "Todoist File" org-todoist-goto)
+                 ("f" "Todoist File" org-todoist-goto)
+                 ("j" "Project" org-todoist-jump-to-project)
                  ("m" "My Tasks" org-todoist-my-tasks)
                  ("u" "User's Tasks" org-todoist-view-user-tasks)
                  ("G" "Show Assignees" org-todoist-show-all-assignees)]
