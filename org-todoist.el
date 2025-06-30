@@ -1930,7 +1930,7 @@ RETURN a value representing if the buffer was modified."
          (let ((temp-buf (current-buffer)))
            (with-current-buffer current-buf
              ;; Use replace-buffer-contents to preserve marks and positions
-             (replace-buffer-contents temp-buf)
+             (replace-buffer-contents temp-buf 0.5 10)
              ;; Restore point and mark positions
              (goto-char current-pos)
              (when current-mark
@@ -2353,19 +2353,27 @@ Example: \"Submit report by tomorrow 5pm p2\""
     (browse-url-xdg-open (format "todoist://project?id=%s" id))))
 
 ;;;###autoload
-(defun org-todoist-jump-to-project (&optional arg)
-  "Select project and narrow to it in the Todoist buffer.
-With prefix arg when projectile is available, defaults to the current project."
-  (interactive "P")
+(defun org-todoist-jump-to-current-project ()
+  "Select the current projectile project and narrow to it in the Todoist buffer."
+  (interactive)
+  (unless (require 'projectile nil 'no-error)
+    (message "Projectile not found, falling back to user-provided project selection. Please install Projectile to use this feature."))
+  (org-todoist-jump-to-project
+   (when (and (require 'projectile nil 'no-error)
+              (fboundp 'projectile-project-name)
+              (not (string= (projectile-project-name) "-")))
+     (projectile-project-name))))
+
+;;;###autoload
+(defun org-todoist-jump-to-project (&optional project)
+  "Select `PROJECT' and narrow to it in the Todoist buffer."
+  (interactive)
   (let* ((ast (org-todoist--file-ast))
          (projects (org-todoist--project-nodes ast))
          (project-names (--map (org-element-property :raw-value it) projects))
-         (selected-project (if (and arg 
-                                    (require 'projectile nil 'no-error)
-                                    (fboundp 'projectile-project-name))
-                               (if (string= (projectile-project-name) "-")
-                                   (completing-read "Which project? " project-names)
-                                 (projectile-project-name))
+         (selected-project (if (and project
+                                    (member project project-names))
+                               project
                              (completing-read "Which project? " project-names)))
          (selected-project-element (--first (string= (org-element-property :raw-value it) selected-project) projects)))
     (when selected-project-element
@@ -2917,6 +2925,7 @@ Local changes that haven't been synced will be preserved during reset."
    [:description (lambda () (propertize "Org View" 'face 'org-todoist-heading-face))
                  ("f" "Todoist File" org-todoist-goto)
                  ("j" "Project" org-todoist-jump-to-project)
+                 ("J" "Current project" org-todoist-jump-to-current-project)
                  ("m" "My Agenda" org-todoist-my-tasks)
                  ("u" "User Agenda" org-todoist-view-user-tasks)
                  ("G" "Show Assignees" org-todoist-show-all-assignees)]
