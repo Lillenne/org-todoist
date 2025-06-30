@@ -700,9 +700,16 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
   "Gets the org-todoist buffer, preferring open buffers."
   (let* ((file (org-todoist-file))
          (fb (find-buffer-visiting file)))
-    (if fb
-        fb
-      (find-file-noselect file))))
+    (or fb (find-file-noselect file))))
+
+(defmacro with-todoist-buffer! (&rest body)
+  "Execute `BODY' with a buffer visiting `ORG-TODOIST-FILE' as current.
+Automatically widens the buffer to ensure all content is accessible."
+  `(with-current-buffer
+       (org-todoist--get-todoist-buffer)
+     (save-restriction
+       (widen)
+       ,@body)))
 
 (defun org-todoist--handle-display (cur-marker)
   "Handle saving and folding of the Todoist buffer.
@@ -1323,8 +1330,8 @@ instead of id."
             (--filter (string= "item_add" (assoc-default 'type it)) commands)
             ;; All other commands last
             (--filter (not (member (assoc-default 'type it)
-                                 '("project_add" "section_add" "item_add")))
-                     commands))))
+                                   '("project_add" "section_add" "item_add")))
+                      commands))))
       sorted-commands)))
 
 (defun org-todoist--is-subtask (NODE)
@@ -1909,36 +1916,33 @@ Use diff to only apply changes rather than rewriting the entire file,
 preserving marks and point location.
 
 RETURN a value representing if the buffer was modified."
-  (with-current-buffer
-      (org-todoist--get-todoist-buffer)
-    (save-restriction
-      (widen)
-      (let* ((new-str (org-todoist-org-element-to-string AST))
-             (current-buf (current-buffer))
-             (current-pos (point))
-             (current-mark (when mark-active (mark)))
-             (inhibit-read-only t)
-             (modified (not (string= new-str (buffer-substring-no-properties (point-min) (point-max))))))
-        (when modified
-          ;; Create temp buffer with new content
-          (with-temp-buffer
-            (insert new-str)
-            (let ((temp-buf (current-buffer)))
-              (with-current-buffer current-buf
-                ;; Use replace-buffer-contents to preserve marks and positions
-                (replace-buffer-contents temp-buf)
-                ;; Restore point and mark positions
-                (goto-char current-pos)
-                (when current-mark
-                  (set-mark current-mark)))))
-          (save-buffer)
-          t)))))
+  (with-todoist-buffer!
+   (let* ((new-str (org-todoist-org-element-to-string AST))
+          (current-buf (current-buffer))
+          (current-pos (point))
+          (current-mark (when mark-active (mark)))
+          (inhibit-read-only t)
+          (modified (not (string= new-str (buffer-substring-no-properties (point-min) (point-max))))))
+     (when modified
+       ;; Create temp buffer with new content
+       (with-temp-buffer
+         (insert new-str)
+         (let ((temp-buf (current-buffer)))
+           (with-current-buffer current-buf
+             ;; Use replace-buffer-contents to preserve marks and positions
+             (replace-buffer-contents temp-buf)
+             ;; Restore point and mark positions
+             (goto-char current-pos)
+             (when current-mark
+               (set-mark current-mark)))))
+       (save-buffer)
+       t))))
 
 (defun org-todoist--file-ast ()
   "Parse the AST of the `'org-todoist-file'."
   (save-current-buffer
     (let ((created (not (file-exists-p (org-todoist-file)))))
-      (with-current-buffer (org-todoist--get-todoist-buffer)
+      (with-todoist-buffer!
         (when created (org-todoist--insert-header)
               (save-buffer))
         (org-element-parse-buffer)))))
@@ -2182,8 +2186,7 @@ Note, a \n character is appended if not present."
   "Verify changes with user before performing a full sync reset.
 Checks for pending sync commands first, then opens ediff if needed.
 After user confirms, performs an incremental sync first, then full reset."
-  (let* ((current-buf (find-file-noselect (org-todoist-file)))
-         (current-ast (with-current-buffer current-buf (org-element-parse-buffer)))
+  (let* ((current-ast (org-todoist--file-ast))
          (last-sync-ast (org-todoist--get-last-sync-buffer-ast))
          (pending-commands (and last-sync-ast
                                 (org-todoist--push current-ast last-sync-ast)))
@@ -2358,8 +2361,8 @@ With prefix arg when projectile is available, defaults to the current project."
          (projects (org-todoist--project-nodes ast))
          (project-names (--map (org-element-property :raw-value it) projects))
          (selected-project (if (and arg 
-                                  (require 'projectile nil 'no-error)
-                                  (fboundp 'projectile-project-name))
+                                    (require 'projectile nil 'no-error)
+                                    (fboundp 'projectile-project-name))
                                (if (string= (projectile-project-name) "-")
                                    (completing-read "Which project? " project-names)
                                  (projectile-project-name))
@@ -2409,44 +2412,45 @@ With prefix arg when projectile is available, defaults to the current project."
   "Quickly select a project, section, or task and open in Todoist app.
 Uses built-in completion without external dependencies."
   (interactive)
-  (let* ((items (with-current-buffer (find-file-noselect (org-todoist-file))
-                  (goto-char (point-min))
-                  (--filter it (org-map-entries
-                                (lambda ()
-                                  (when (equal org-todoist--task-type (org-entry-get nil org-todoist--type))
-                                    (let* ((id (org-entry-get nil org-todoist--id-property))
-                                           (title (org-entry-get nil "ITEM"))
-                                           (assignee (org-entry-get nil "RESPONSIBLE_UID"))
-                                           (project (org-element-property :raw-value
-                                                                          (org-todoist--get-parent-of-type org-todoist--project-type (org-element-at-point) t)))
-                                           (section (org-element-property :raw-value
-                                                                          (org-todoist--get-parent-of-type org-todoist--section-type (org-element-at-point) t)))
-                                           (todo-state (org-entry-get nil "TODO"))
-                                           (priority (org-entry-get nil "PRIORITY"))
-                                           (effort (org-entry-get nil "EFFORT"))
-                                           (is-done (member todo-state `(,org-todoist-done-keyword ,org-todoist-deleted-keyword))))
+  (let* ((items (with-todoist-buffer!
+                 (goto-char (point-min))
+                 ;; sort the items by project and section. Within a section, sort by due data.
+                 (--filter it (org-map-entries
+                               (lambda ()
+                                 (when (equal org-todoist--task-type (org-entry-get nil org-todoist--type))
+                                   (let* ((id (org-entry-get nil org-todoist--id-property))
+                                          (title (org-entry-get nil "ITEM"))
+                                          (assignee (org-entry-get nil "RESPONSIBLE_UID"))
+                                          (project (org-element-property :raw-value
+                                                                         (org-todoist--get-parent-of-type org-todoist--project-type (org-element-at-point) t)))
+                                          (section (org-element-property :raw-value
+                                                                         (org-todoist--get-parent-of-type org-todoist--section-type (org-element-at-point) t)))
+                                          (todo-state (org-entry-get nil "TODO"))
+                                          (priority (org-entry-get nil "PRIORITY"))
+                                          (effort (org-entry-get nil "EFFORT"))
+                                          (is-done (member todo-state `(,org-todoist-done-keyword ,org-todoist-deleted-keyword))))
 
-                                      (cons
-                                       (s-join " "
-                                               `(,(propertize project 'face 'org-level-1)
-                                                 "•"
-                                                 ,(propertize (or section org-todoist--default-section-name) 'face 'org-level-2)
-                                                 "•"
-                                                 ,(when priority
-                                                    (propertize (format "[#%s]" priority) 'face 'org-priority))
-                                                 ,(propertize todo-state 'face (if is-done 'shadow 'org-todo))
-                                                 ,(if is-done
-                                                      (propertize title 'face 'shadow)
-                                                    title)
+                                     (cons
+                                      (s-join " "
+                                              `(,(propertize project 'face 'org-level-1)
+                                                "•"
+                                                ,(propertize (or section org-todoist--default-section-name) 'face 'org-level-2)
+                                                "•"
+                                                ,(when priority
+                                                   (propertize (format "[#%s]" priority) 'face 'org-priority))
+                                                ,(propertize todo-state 'face (if is-done 'shadow 'org-todo))
+                                                ,(if is-done
+                                                     (propertize title 'face 'shadow)
+                                                   title)
 
-                                                 ,(when assignee
-                                                    (propertize (format "(@%s)" (org-element-property :raw-value
-                                                                                                      (org-todoist--get-by-id org-todoist--collaborator-type assignee (org-todoist--file-ast))))
-                                                                'face 'org-link))
-                                                 ,(when effort
-                                                    (propertize (format "(%s)" effort) 'face 'org-special-keyword))))
-                                       id)
-                                      )))))))
+                                                ,(when assignee
+                                                   (propertize (format "(@%s)" (org-element-property :raw-value
+                                                                                                     (org-todoist--get-by-id org-todoist--collaborator-type assignee (org-todoist--file-ast))))
+                                                               'face 'org-link))
+                                                ,(when effort
+                                                   (propertize (format "(%s)" effort) 'face 'org-special-keyword))))
+                                      id)
+                                     )))))))
          (selection (completing-read "Select Todoist item: " items))
          (id (cdr (assoc selection items))))
 
@@ -2913,8 +2917,8 @@ Local changes that haven't been synced will be preserved during reset."
    [:description (lambda () (propertize "Org View" 'face 'org-todoist-heading-face))
                  ("f" "Todoist File" org-todoist-goto)
                  ("j" "Project" org-todoist-jump-to-project)
-                 ("m" "My Tasks" org-todoist-my-tasks)
-                 ("u" "User's Tasks" org-todoist-view-user-tasks)
+                 ("m" "My Agenda" org-todoist-my-tasks)
+                 ("u" "User Agenda" org-todoist-view-user-tasks)
                  ("G" "Show Assignees" org-todoist-show-all-assignees)]
    [:description (lambda () (propertize "Item Actions" 'face 'org-todoist-heading-face))
                  ("i" "Ignore Subtree" org-todoist-ignore-subtree)
