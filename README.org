@@ -42,16 +42,20 @@ Syncing is done using the [[https://developer.todoist.com/api/v1/][Todoist sync 
 * Usage
 ** Bidirectional sync
 #+begin_src emacs-lisp
-;; Unless ARG, go to the Todoist buffer.
-(org-todoist-sync &optional ARG)
+;; Sync commands and options:
+(org-todoist-sync &optional ARG)     ;; Perform incremental sync. With ARG, don't open buffer
+(org-todoist--reset &optional ARG)   ;; Full reset from Todoist. With prefix ARG (C-u):
+                                    ;; - Single prefix: Don't open buffer
+                                    ;; - Double prefix (C-u C-u): Delete and recreate file
+
+;; Background sync:
+(org-todoist-background-sync)        ;; Start background sync at configured interval 
+(org-todoist-cancel-background-sync) ;; Stop background sync
+(org-todoist-toggle-background-sync) ;; Toggle background sync on/off
 #+end_src
 
 *Local changes will overwrite remote changes!*
 
-To automatically sync at a given interval, unless the ~org-todoist-file~ is visited by the active buffer:
-#+begin_src emacs-lisp
-(run-at-time nil 180 #'org-todoist-background-sync)
-#+end_src
 ** Mapping org headlines to Todoist objects
 
 | Org                       | Todoist                     |
@@ -86,6 +90,9 @@ Org tags are mapped directly to Todoist labels and support inherited tags. Note,
 
 Projects and sections can be archived in Todoist by applying the ~org-archive-tag~ to the headline. Note, you cannot archive the default section and if you do locally on your org document it will not be synced.
 ** Comments and notifications
+:PROPERTIES:
+:ID:       21eaaeab-ad6f-4fc1-abb6-4c39bf20e0bd
+:END:
 Comments are done via ~org-add-note~ and currently ([2025-01-12 Sun]) do not support editing or deletion from org mode. Within comments, other users can be notified via the ~org-todoist-tag-user~ command, which will prompt for completion of the desired user, send a request to notify them in the comment's note_add command, and input a special markdown syntax into the comment which will property display as @<User> in the Todoist app. If you prefer to use the org link syntax and have it look funny in the Todoist app, set ~org-todoist-comment-tag-user-pretty~ to non-nil.
 
 #+begin_src emacs-lisp
@@ -100,15 +107,50 @@ Comments are done via ~org-add-note~ and currently ([2025-01-12 Sun]) do not sup
 ** Assigning Tasks
 #+begin_src emacs-lisp
 (org-todoist-assign-task) ;; Prompts for user selection and changes the responsible uid property to the user's id
-(org-todoist-unassign-task) ;; Removes the responsibile uid property
+(org-todoist-unassign-task) ;; Removes the responsible uid property
+(org-todoist-show-assignee) ;; Show assignee as an overlay next to the current task
+(org-todoist-show-all-assignees) ;; Show assignees for all tasks in the buffer
+(org-todoist-my-tasks &optional ARG USER) ;; View an agenda of tasks assigned to USER (defaults to current user)
+                                         ;; With prefix ARG, include unassigned tasks
+(org-todoist-view-user-tasks USER) ;; View tasks assigned to a specific user
 #+end_src
 
 [[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/assign.png]]
+
+** Interactive Command Interface
+org-todoist provides an interactive transient menu interface that can be accessed via:
+
+#+begin_src emacs-lisp
+(org-todoist-dispatch)
+#+end_src
+
+This menu provides easy access to all org-todoist commands and displays the current status of features like background sync and remote deletion.
+
+** Navigation and Views
+#+begin_src emacs-lisp
+(org-todoist-goto) ;; Jump to the org-todoist file
+(org-todoist-jump-to-project) ;; Select and jump to a project
+(org-todoist-jump-to-current-project) ;; Jump to project matching current projectile project
+#+end_src
+
+** Opening in Todoist App
+#+begin_src emacs-lisp
+(org-todoist-xdg-open) ;; Open current task in Todoist app
+(org-todoist-xdg-open-project) ;; Open selected project in Todoist app
+(org-todoist-xdg-open-search-query QUERY) ;; Open search results in Todoist app
+(org-todoist-xdg-open-quickadd) ;; Open Todoist quick add panel
+(org-todoist-open-last-quick-task-in-app) ;; Open the last quick-added task
+#+end_src
+
+Opening relies on ~browse-url-xdg-open~.
+
 ** Ignoring subtrees
 If you'd like to keep other notes or TODOs alongside your projects and not have them synced to Todoist, you can mark a subtree as ignored by setting the ~TODOIST_TYPE~ property to ~IGNORED~ using M-x ~org-todoist-ignore-subtree~. Any org element descendent from an ignored node will not have its changes pushed to Todoist.
 
 ** Org capture to a Todoist project section
 /Captures will automatically sync by default/ via the ~org-capture-finalize-hook~. If you would like to change this behavior, run ~(remove-hook 'org-capture-after-finalize-hook #'org-todoist--sync-after-capture)~.
+
+Captures can be run from the transient interface with default capture templates via ~(org-todoist-capture-task)~. Alternatively, one can add their own templates like in the sample below:
 
 Sample capture templates:
 #+begin_src emacs-lisp
@@ -134,7 +176,7 @@ Sample capture templates:
 
 - [-] Essential task items
   - [-] Recurring tasks[fn:2]
-  - [ ] Quick add
+  - [X] Quick add
 - [-] Comments
   - [-] Item comments
     - [X] Add and pull (plain-text only)
@@ -148,7 +190,7 @@ Sample capture templates:
     - [ ] Delete
     - [ ] Notify other users
 ** Quirks
-- Once a task has been permanently deleted in Todoist, changing the TODO state in org will be reset back to org-todoist-deleted-keyword on next sync. Todoist does not support reviving permanently deleted tasks.
+- Once a task has been permanently deleted in Todoist, changing the TODO state in org will be reset back to ~org-todoist-deleted-keyword~ on next sync. Todoist does not support reviving permanently deleted tasks.
 - Comments on subtasks are added to both the root task and the subtask on Todoist, which is reflected here.
 - The org element API does not properly parse property drawers if anything besides is put above them (e.g. adding your description above the property drawer), so don't do that!
 * Configuration
@@ -168,9 +210,12 @@ The following commands are automatically available after installation (no requir
 
 #+begin_src emacs-lisp
 ;; Sync commands
-(org-todoist-sync)
-(org-todoist-background-sync)
-(org-todoist-ediff-snapshot)
+(org-todoist-sync &optional ARG) ;; Sync with Todoist. With ARG, don't open buffer after sync
+(org-todoist-background-sync) ;; Start background sync at configured interval
+(org-todoist-cancel-background-sync) ;; Stop background sync
+(org-todoist-toggle-background-sync) ;; Toggle background sync on/off
+(org-todoist-ediff-snapshot) ;; Compare current file with last synced state
+(org-todoist-toggle-remote-deletion) ;; Toggle deletion of remote items
 
 ;; Task management
 (org-todoist-assign-task)
@@ -188,7 +233,7 @@ The following commands are automatically available after installation (no requir
 #+end_src
 ** Updating from Sync v9 endpoint to the new unified API v1
 1. Migrate your current ~org-todoist-file~ to conform to the new format via ~org-todoist-migrate-to-v1~
-2. Opt in to using the new unified API v1 after migration setting the ~org-todoist-use-v1-api~ variable to ~t~
+2. Opt in to using the new unified API v1 after migration setting the ~org-todoist-api-version~ variable to ~'unified-v1~
 ** Optional
 *** Core Configuration
 - ~org-todoist-p1~ - Priority character for Todoist P1 (default: ?A)
@@ -216,11 +261,15 @@ The following commands are automatically available after installation (no requir
 
 *** Behavior
 - ~org-todoist-delete-remote-items~ - Delete items removed from org file (default: nil)
+- ~org-todoist-duration-as-timestamp~ - Use timestamp ranges instead of EFFORT property for duration (default: nil)
 - ~org-todoist-file~ - Todoist org filename (default: "todoist.org")
 - ~org-todoist-use-auto-reminder~ - Use default reminders for new tasks (default: t)
 - ~org-todoist-infer-project-for-capture~ - Use projectile project for capture templates (default: t)
 - ~org-todoist-extract-deleted~ - Remove deleted items from org file (default: nil)
 - ~org-todoist-storage-dir~ - Storage directory for sync data (default: ~/.cache/org-todoist)
+- ~org-todoist-command-batch-size~ - Maximum number of commands to send in a single sync request (default: 75)
+
+The Todoist API has a limit of 100 commands per request. When syncing large changes, org-todoist automatically batches commands into smaller chunks to avoid hitting this limit. The batch size can be configured via ~org-todoist-command-batch-size~ (defaults to 75 due to API 503 errors at 100 during development).
 
 *** Status Keywords
 - ~org-todoist-todo-keyword~ - Active tasks (default: "TODO")
@@ -230,6 +279,7 @@ The following commands are automatically available after installation (no requir
 *** Advanced
 
 ** Troubleshooting
+
 For troubleshooting errors, you can use the following variables and methods:
 - ~org-todoist-diagnose~ - Shows a pretty org-mode view of the information below
 - ~org-todoist-report-bug~ - Copy the diagnostics view as GitHub flavored markdown and open the url to create a new issue.
@@ -239,15 +289,17 @@ For troubleshooting errors, you can use the following variables and methods:
 - ~org-todoist-ediff-snapshot~ to see changes since the last snapshot in ediff
 
 * Why?
-Org mode is an excellent planning and note-taking tool, but struggles in a few areas:
+My wife uses Todoist and will never use Emacs.
+
+Also: Org mode is an excellent planning and note-taking tool, but struggles in a few areas:
 
 - Collaboration with others
 - Mobile app features / availability (shoutout to [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly for their great android app]])
 - Sync between devices (I personally use [[https://syncthing.net/][Syncthing]] which works well, but will often have conflicts when adding from the widget)
 
-Todoist fills these gaps and, more importantly, my wife uses it.
+Todoist fills these gaps and, more importantly, (again) my wife uses it.
 
-There is currently [[https://github.com/abrochard/emacs-todoist][another great integration]] for org-mode and todoist, but it takes a fundamentally different approach (stateless on-demand regeneration using many requests with the [[https://developer.todoist.com/rest/v2/#overview][REST API]] vs stateful syncing with a single request to the [[https://developer.todoist.com/sync/v9/#overview][sync API]] that can be queried by [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly]] on mobile and buffer creation with org.el vs [[https://orgmode.org/worg/dev/org-element-api.html][org-element-api]]).
+There is currently [[https://github.com/abrochard/emacs-todoist][another great integration]] for org-mode and todoist, but it takes a fundamentally different approach (stateless on-demand regeneration using many requests with the [[https://developer.todoist.com/rest/v2/#overview][REST API]] vs stateful syncing with batched request to the [[https://developer.todoist.com/sync/v9/#overview][sync API]] that can be used to track time or queried by [[https://github.com/orgzly-revived/orgzly-android-revived][Orgzly]] on mobile and buffer creation with org.el vs [[https://orgmode.org/worg/dev/org-element-api.html][org-element-api]]).
 
 * Contributing, Issues, and Feature Request
 Feel free to submit an [[https://github.com/Lillenne/org-todoist/issues/new][issue or feature request]]! For issues, please use the inbuilt ~org-todoist-report-bug~ function. When submitting issues *please see the [[Troubleshooting][troubleshooting]] section and attach the response json (or at least the error information)*. I'll do my best to address issues timely and evaluate feature additions. I work full time and have two very young boys, so if there is a feature you want to add please feel free to submit a PR yourself!
@@ -259,14 +311,14 @@ My personal test API call data is included in the repo to show the API return fo
 To test interacting with the Todoist API using curl with your own data, you can use the following commands. Note, Todoist has many great examples using curl in their [[https://developer.todoist.com/sync/v9/#overview][API documentation]].
 
 #+begin_src shell
-curl https://api.todoist.com/sync/v9/sync \
+curl https://api.todoist.com/api/v1/sync \
     -H "Authorization: Bearer <token> " \
     -d sync_token='sSK9OCkrXyWsUjMU0g6iuS05TwAKhmceWSiL7FCho_p2SRb23dpApCsv9u_P2jyidIDJqjE94dzOeB-1JnipI5wJRl01N8ZdaeTBdMUbxvWZavpF' \
     -d resource_types='["all"]'
 #+end_src
 
 #+begin_src shell
-curl https://api.todoist.com/sync/v9/sync \
+curl https://api.todoist.com/api/v1/sync \
     -H "Authorization: Bearer <token>" \
     -d commands='[
     {
@@ -278,7 +330,7 @@ curl https://api.todoist.com/sync/v9/sync \
     }]'
 #+end_src
 
-** Not on Roadmap
+** Not (currently) on Roadmap
 
 Things that I am not currently planning to implement (myself! you are welcome to!) due to time restrictions or it not being important to my workflow:
 - File attachments
