@@ -92,14 +92,6 @@ This value must fall between `org-priority-lowest' and `org-priority-highest'."
   :type '(choice (const nil) string)
   :group 'org-todoist)
 
-(defcustom org-todoist-api-version 'sync-v9
-  "Which Todoist API version to use.
-Valid values: 'sync-v9 (Sync API v9) or 'unified-v1 (Unified API v1).
-If nil, defaults to 'sync-v9 for backward compatibility."
-  :type '(choice (const :tag "Sync API v9" sync-v9)
-          (const :tag "Unified API v1" unified-v1))
-  :group 'org-todoist)
-
 (defcustom org-todoist-delete-remote-items nil
   "Delete items on Todoist when deleted from the variable `org-todoist-file'.
 WARNING items archived to sibling files will be detected as deleted!"
@@ -241,7 +233,12 @@ this directory must be accessible on all PCs running the sync command."
 (defvar org-todoist--background-timer nil
   "Timer for running background syncs.")
 
+(defvar org-todoist--api-version nil "Previously used API version. Detected by Todoist.")
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defconst org-todoist--default-api-version 'v1)
+
+(defconst org-todoist--api-version-prop "API")
+
 (defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators") "The list of resource types to sync.")
 
 (defconst org-todoist-request-type "application/x-www-form-urlencoded; charset=utf-8" "The request type for Todoist sync requests.")
@@ -340,6 +337,47 @@ this directory must be accessible on all PCs running the sync command."
       (with-temp-buffer (insert-file-contents file)
                         (buffer-substring-no-properties (point-min) (point-max)))))
 
+(defun org-todoist--is-current-api (&optional AST)
+  "Check if the API version of the `org-todoist-file' is current."
+  (eq (org-todoist--api-version AST) org-todoist--default-api-version))
+
+(defun org-todoist--api-version (&optional AST)
+  "Return the Todoist API version. Use parsed syntax tree `AST' if available."
+  (setq org-todoist--api-version
+        (or org-todoist--api-version
+            ;; AST supplied, check for version in metadata node
+            (when AST
+              (let* ((md (org-todoist--metadata-node AST))
+                     (vers (org-todoist--get-prop md org-todoist--api-version-prop)))
+                ;; If version is set in metadata, use it
+                (or (unless (or (null vers) (string-blank-p vers))
+                      (intern vers))
+                    ;; If no version set, check for v9
+                    (when (org-todoist--is-v9 AST)
+                      'sync-v9))))
+            ;; otherwise try to find the version in the file
+            (and (file-exists-p (org-todoist-file))
+                 (or (with-todoist-buffer!
+                      ;; quicker regexp search
+                      (goto-char (point-min))
+                      (when (and (re-search-forward (format org-complex-heading-regexp-format
+                                                            (regexp-quote org-todoist-metadata-headline))
+                                                    nil t)
+                                 (not (s-blank? (org-entry-get nil org-todoist--api-version-prop))))
+                        (intern (org-entry-get nil org-todoist--api-version-prop))))
+                     ;; fallback to AST
+                     (let ((vers (org-todoist--get-prop
+                                  (org-todoist--metadata-node
+                                   (setq AST (org-todoist--file-ast)))
+                                  org-todoist--api-version-prop)))
+                       (unless (or (null vers) (string-blank-p vers))
+                         (intern vers)))
+                       ;; No API version found, check for v9
+                       (when (org-todoist--is-v9 AST)
+                         'sync-v9)))
+                 ;; no todoist file or version found
+                 org-todoist--default-api-version)))
+
                                         ;Hooks;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--item-close-hook ()
   "Send an item_close request for TODO at point."
@@ -353,7 +391,7 @@ this directory must be accessible on all PCs running the sync command."
                                                 ("uuid" . ,(org-id-uuid))
                                                 ("args" . ,args)))))))
       (setq org-todoist--sync-err nil)
-      (unless (eq org-todoist-api-version 'unified-v1)
+      (unless (org-todoist--is-current-api)
         (user-error "Org todoist has updated API versions! Run 'org-todoist-migrate-to-v1' and set 'org-todoist-use-v1-api' to 't' to continue using org-todoist"))
       (org-todoist--api-call
        request-data
@@ -497,10 +535,10 @@ the Todoist project, section, and optionally parent task."
 (defun org-todoist--sync-endpoint ()
   "Return the correct Todoist API endpoint URL based on version."
   (cond
-   ((eq org-todoist-api-version 'unified-v1)
+   ((eq (org-todoist--api-version) 'v1)
     "https://api.todoist.com/api/v1/sync")
-   ((or (eq org-todoist-api-version 'sync-v9) (null org-todoist-api-version))
-    (error "Sync API v9 is deprecated! Run 'org-todoist-migrate-to-v1' and set 'org-todoist-api-version' to 'unified-v1'"))))
+   ((or (eq (org-todoist--api-version) 'sync-v9) )
+    (error "Sync API v9 is deprecated! Run 'org-todoist-migrate-to-v1'"))))
 ;; "https://api.todoist.com/sync/v9/sync")))
 
 (defun org-todoist--storage-file (FILE)
@@ -631,7 +669,7 @@ the Todoist project, section, and optionally parent task."
                                 (goto-char (point-min))
                                 (search-forward "\r\n\r\n" nil t)))) ; Find end of headers
              (if (= exit-code 0)
-                 (let* ((resp-body (if headers-end 
+                 (let* ((resp-body (if headers-end
                                        (buffer-substring-no-properties headers-end (point-max))
                                      (buffer-string)))
                         (response (json-read-from-string resp-body)))
@@ -684,10 +722,9 @@ SYNC-REQUEST forces synchronous execution and blocks Emacs. Use sparingly.
 `callback-fn' is a function to call with the JSON response.
 `callback-args' are additional arguments for the callback.
 Uses `curl' if available, otherwise falls back to `url-retrieve'."
-  (unless (eq org-todoist-api-version 'unified-v1)
-    (if (file-exists-p (org-todoist-file))
-        (user-error "Sync API v9 is deprecated! Run 'org-todoist-migrate-to-v1' and set 'org-todoist-api-version' to 'unified-v1'")
-      (user-error "Sync API v9 is deprecated! Set 'org-todoist-api-version' to 'unified-v1'")))
+  (unless (eq (org-todoist--api-version) 'v1)
+    (user-error "Sync API v9 is deprecated! Run 'org-todoist-migrate-to-v1'")
+    )
   (let ((encoded-data (org-todoist--encode request-data)))
     (org-todoist--set-last-request encoded-data)
     (if (and (not sync-request) (executable-find "curl"))
@@ -1099,7 +1136,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
   "Return the correct id argument for the current API version.
 For some commands like item_complete and item_delete, v9 API uses ids
 instead of id."
-  (if (and (not (eq org-todoist-api-version 'unified-v1))
+  (if (and (not (eq (org-todoist--api-version) 'v1))
            (member command-type '("item_complete" "item_delete")))
       `("ids" . (,id))
     `("id" . ,id)))
@@ -1409,7 +1446,7 @@ instead of id."
            (append
             ;; Project adds first
             (--filter (string= "project_add" (assoc-default 'type it)) commands)
-            ;; Section adds second  
+            ;; Section adds second
             (--filter (string= "section_add" (assoc-default 'type it)) commands)
             ;; Item adds third
             (--filter (string= "item_add" (assoc-default 'type it)) commands)
@@ -2238,10 +2275,10 @@ Note, a \n character is appended if not present."
   "Remove spaces from `STRING'."
   (string-replace " " "" STRING))
 
-(defun org-todoist--is-v9 ()
+(defun org-todoist--is-v9 (&optional AST)
   "Check if any org-todoist-ids are numeric (indicates v9 API IDs)."
   (catch 'found
-    (org-element-map (org-todoist--file-ast) 'headline
+    (org-element-map (or AST (org-todoist--file-ast)) 'headline
       (lambda (hl)
         (when-let* ((supported (member
                                 (org-todoist--get-todoist-type hl t)
@@ -2589,15 +2626,11 @@ Includes last request, response, diff, and push information."
       (org-mode)
 
       ;; API Version Warning
-      (when (or (null org-todoist-api-version) (eq org-todoist-api-version 'sync-v9))
+      (when (or (null (org-todoist--api-version)) (eq (org-todoist--api-version) 'sync-v9))
         (insert "*WARNING:* Using deprecated Todoist Sync API v9\n"
                 "Migrate to Unified API v1 with:\n"
                 "#+begin_src emacs-lisp\n"
                 "(org-todoist-migrate-to-v1)\n"
-                "#+end_src\n"
-                "And add the following to your emacs init configuration:\n"
-                "#+begin_src emacs-lisp\n"
-                "(setq org-todoist-api-version 'unified-v1)\n"
                 "#+end_src\n"
                 "===============================================\n\n"))
 
@@ -2827,10 +2860,14 @@ format used by API v1. This should only be run once. It requires
                       (new-id (gethash old-id id-map)))
             (org-todoist--insert-id hl new-id))))
 
-      ;; 4. Write updated AST to file
+      ;; 4. Update API version
+      (org-todoist--add-prop (org-todoist--metadata-node ast)
+                             org-todoist--api-version-prop
+                             (setq org-todoist--api-version 'v1))
+
+      ;; 5. Write updated AST to file
       (org-todoist--update-file ast)
-      (message "Migration to API v1 complete. Your Todoist file has been updated with new IDs.
-You MUST set org-todoist-use-v1-api to 't' to continue using org-todoist!"))))
+      (message "Migration to API v1 complete. Your Todoist file has been updated with new IDs."))))
 
 ;;;###autoload
 (defun org-todoist-my-tasks (&optional ARG USER)
@@ -2970,11 +3007,12 @@ Local changes that haven't been synced will be preserved during reset."
             (cdr unit))))
 
 (defun org-todoist--api-version-display ()
-  (format "API Version: %s" (let ((str (propertize (symbol-name (or org-todoist-api-version 'sync-v9)) 'face
-                                                   (if (eq org-todoist-api-version 'unified-v1)
+  (format "API Version: %s" (let ((str (propertize (symbol-name (org-todoist--api-version))
+                                                   'face
+                                                   (if (org-todoist--is-current-api)
                                                        'org-todoist-enabled-face
                                                      'org-todoist-red-face))))
-                              (if (eq org-todoist-api-version 'unified-v1)
+                              (if (org-todoist--is-current-api)
                                   str
                                 (concat str " "
                                         (propertize "[DEPRECATED! Press to migrate]" 'face '(:inherit shadow :weight bold)))))))
@@ -2999,7 +3037,7 @@ Local changes that haven't been synced will be preserved during reset."
   :key "V"
   :description #'org-todoist--api-version-display
   (interactive)
-  (if (eq org-todoist-api-version 'unified-v1)
+  (if (org-todoist--is-current-api)
       (message "You are already using the most recent API version.")
     (org-todoist-migrate-to-v1)))
 
