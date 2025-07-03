@@ -717,8 +717,7 @@ SYNC-REQUEST forces synchronous execution and blocks Emacs. Use sparingly.
 `callback-args' are additional arguments for the callback.
 Uses `curl' if available, otherwise falls back to `url-retrieve'."
   (unless (eq (org-todoist--api-version) 'v1)
-    (user-error "Sync API v9 is deprecated! Run 'org-todoist-migrate-to-v1'")
-    )
+    (user-error "Sync API v9 is deprecated! Run 'org-todoist-migrate-to-v1'"))
   (let ((encoded-data (org-todoist--encode request-data)))
     (org-todoist--set-last-request encoded-data)
     (if (and (not sync-request) (executable-find "curl"))
@@ -2863,6 +2862,22 @@ format used by API v1. This should only be run once. It requires
 
       ;; 5. Write updated AST to file
       (org-todoist--update-file ast)
+
+      ;; 6. Update org-todoist--last-sync-buffer to use the updated ids
+      (when (file-exists-p (org-todoist--storage-file org-todoist--sync-buffer-file))
+        (with-current-buffer (find-file-noselect (org-todoist--storage-file org-todoist--sync-buffer-file))
+          (org-mode)
+          (goto-char (point-min))
+          (org-map-entries
+           (lambda ()
+             (let ((old-id (org-entry-get nil org-todoist--id-property)))
+               (when old-id
+                 (let ((new-id (gethash old-id id-map)))
+                   (when new-id
+                     (org-set-property org-todoist--id-property new-id)))))))
+          (save-buffer)
+          (kill-buffer)))
+
       (message "Migration to API v1 complete. Your Todoist file has been updated with new IDs."))))
 
 ;;;###autoload
