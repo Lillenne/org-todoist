@@ -46,62 +46,120 @@
                                         ;Configuration Variables;;;;;;;;;;;;;;;
 (defvar url-http-end-of-headers) ;; defined in url, but emacs provides warning about free var when using
 
-(defvar org-todoist-p1 ?A "The priority to map to Todoist P1.
-This value must fall between `org-priority-lowest' and `org-priority-highest'.")
+(defgroup org-todoist nil
+  "Sync Todoist tasks to org mode and vice versa."
+  :group 'external
+  :prefix "org-todoist-"
+  :link '(url-link "https://github.com/Lillenne/org-todoist"))
 
-(defvar org-todoist-p2 ?B "The priority to map to Todoist P2.
-This value must fall between `org-priority-lowest' and `org-priority-highest'.")
+(defgroup org-todoist nil
+  "Settings for org-todoist."
+  :group 'org
+  :prefix "org-todoist-")
 
-(defvar org-todoist-p3 ?C "The priority to map to Todoist P3.
-This value must fall between `org-priority-lowest' and `org-priority-highest'.")
+(defcustom org-todoist-p1 ?A
+  "The priority to map to Todoist P1.
+This value must fall between `org-priority-lowest' and `org-priority-highest'."
+  :type 'character
+  :group 'org-todoist)
 
-(defvar org-todoist-p4 ?D "The priority to map to Todoist P4.
-This value must fall between `org-priority-lowest' and `org-priority-highest'.")
+(defcustom org-todoist-p2 ?B
+  "The priority to map to Todoist P2.
+This value must fall between `org-priority-lowest' and `org-priority-highest'."
+  :type 'character
+  :group 'org-todoist)
 
-(defvar org-todoist-priority-default ?D "The default priority for Todoist tasks.
-This value must fall between `org-priority-lowest' and `org-priority-highest'.")
+(defcustom org-todoist-p3 ?C
+  "The priority to map to Todoist P3.
+This value must fall between `org-priority-lowest' and `org-priority-highest'."
+  :type 'character
+  :group 'org-todoist)
 
-(defvar org-todoist-api-token nil "The API token to use to sync with Todoist.")
+(defcustom org-todoist-p4 ?D
+  "The priority to map to Todoist P4.
+This value must fall between `org-priority-lowest' and `org-priority-highest'."
+  :type 'character
+  :group 'org-todoist)
 
-(defvar org-todoist-api-version 'sync-v9
+(defcustom org-todoist-priority-default ?D
+  "The default priority for Todoist tasks.
+This value must fall between `org-priority-lowest' and `org-priority-highest'."
+  :type 'character
+  :group 'org-todoist)
+
+(defcustom org-todoist-api-token nil
+  "The API token to use to sync with Todoist."
+  :type '(choice (const nil) string)
+  :group 'org-todoist)
+
+(defcustom org-todoist-api-version 'sync-v9
   "Which Todoist API version to use.
 Valid values: 'sync-v9 (Sync API v9) or 'unified-v1 (Unified API v1).
-If nil, defaults to 'sync-v9 for backward compatibility.")
+If nil, defaults to 'sync-v9 for backward compatibility."
+  :type '(choice (const :tag "Sync API v9" sync-v9)
+          (const :tag "Unified API v1" unified-v1))
+  :group 'org-todoist)
 
-(defvar org-todoist-delete-remote-items nil
+(defcustom org-todoist-delete-remote-items nil
   "Delete items on Todoist when deleted from the variable `org-todoist-file'.
-WARNING items archived to sibling files will be detected as deleted!")
+WARNING items archived to sibling files will be detected as deleted!"
+  :type 'boolean
+  :group 'org-todoist)
 
-(defvar org-todoist-extract-deleted nil
+(defcustom org-todoist-extract-deleted nil
   "Non-nil if remotely deleted items should be removed from the org file.
 
-Otherwise, leave deleted items in tree but mark as ignored and canceled")
+Otherwise, leave deleted items in tree but mark as ignored and canceled"
+  :type 'boolean
+  :group 'org-todoist)
 
-(defvar org-todoist-file "todoist.org" "The name of the todoist org file.
-If relative, it is taken as relative to the org directory.")
+(defcustom org-todoist-file "todoist.org"
+  "The name of the todoist org file.
+If relative, it is taken as relative to the org directory."
+  :type 'string
+  :group 'org-todoist)
 
-(defvar org-todoist-user-headline "Collaborators" "The name of the root collaborators metadata node.")
+(defcustom org-todoist-user-headline "Collaborators"
+  "The name of the root collaborators metadata node."
+  :type 'string
+  :group 'org-todoist)
 
-(defvar org-todoist-metadata-headline "Todoist Metadata" "The name of the Todoist metadata node.")
+(defcustom org-todoist-metadata-headline "Todoist Metadata"
+  "The name of the Todoist metadata node."
+  :type 'string
+  :group 'org-todoist)
 
-(defvar org-todoist-tz nil
+(defcustom org-todoist-tz nil
   "The timezone to use when converting from Todoist time (UTC).
-Currently this is ignored in favor of `current-time'.")
+Currently this is ignored in favor of `current-time'."
+  :type '(choice (const nil) string)
+  :group 'org-todoist)
 
-(defvar org-todoist-lang "en" "The language for Todoist time strings.")
+(defcustom org-todoist-lang "en"
+  "The language for Todoist time strings."
+  :type 'string
+  :group 'org-todoist)
 
-(defvar org-todoist-use-auto-reminder t "Whether new tasks should use your Todoist's default reminder.")
+(defcustom org-todoist-use-auto-reminder t
+  "Whether new tasks should use your Todoist's default reminder."
+  :type 'boolean
+  :group 'org-todoist)
 
-(defvar org-todoist-infer-project-for-capture t
-  "Whether to infer the active project in `org-capture'.")
+(defcustom org-todoist-infer-project-for-capture t
+  "Whether to infer the active project in `org-capture'."
+  :type 'boolean
+  :group 'org-todoist)
 
-(defvar org-todoist-my-id nil "Your Todoist id.
+(defcustom org-todoist-my-id nil
+  "Your Todoist id.
 
 Set this if your todoist full_name differs from symbol `user-full-name'.
 The correct value can be found in the variable `org-todoist-file' under
-Todoist Metadata > Collaborators > <your-name> as the property \"tid\".")
+Todoist Metadata > Collaborators > <your-name> as the property \"tid\"."
+  :type '(choice (const nil) string)
+  :group 'org-todoist)
 
-(defvar org-todoist-show-n-levels nil
+(defcustom org-todoist-show-n-levels nil
   "The number of headline levels to show by default.
 If visiting the todoist buffer when sync is called, it will attempt to
 respect the visibility of the item at pos.
@@ -111,34 +169,61 @@ nil=do not adjust folds
 4=root tasks,
 5=root tasks + 1 level of subtasks
 `no-fold' always fully expand everything except property drawers
-`todo-tree' automatically apply `org-show-todo-tree'.")
+`todo-tree' automatically apply `org-show-todo-tree'."
+  :type '(choice (const :tag "Don't adjust folds" nil)
+          (const :tag "Show projects" 1)
+          (const :tag "Show sections" 2)
+          (const :tag "Show root tasks" 3)
+          (const :tag "Show root tasks + 1 level" 4)
+          (const :tag "Show root tasks + 2 levels" 5)
+          (const :tag "Show everything" no-fold)
+          (const :tag "Show todo tree" todo-tree)
+          (const :tag "I should setq to my desired number" nil))
+  :group 'org-todoist)
 
-(defvar org-todoist-todo-keyword "TODO" "TODO keyword for active Todoist tasks.")
+(defcustom org-todoist-todo-keyword "TODO"
+  "TODO keyword for active Todoist tasks."
+  :type 'string
+  :group 'org-todoist)
 
-(defvar org-todoist-done-keyword "DONE" "TODO keyword for completed Todoist tasks.")
+(defcustom org-todoist-done-keyword "DONE"
+  "TODO keyword for completed Todoist tasks."
+  :type 'string
+  :group 'org-todoist)
 
-(defvar org-todoist-deleted-keyword "CANCELED" "TODO keyword for deleted Todoist tasks.")
+(defcustom org-todoist-deleted-keyword "CANCELED"
+  "TODO keyword for deleted Todoist tasks."
+  :type 'string
+  :group 'org-todoist)
 
-(defvar org-todoist-command-batch-size 75
+(defcustom org-todoist-command-batch-size 75
   "The number of commands to send in a single Todoist sync request.
 The official limit is 100, but this can be set lower to avoid issues.
-100 caused 503 errors during development, so it is set to 75 by default.")
+100 caused 503 errors during development, so it is set to 75 by default."
+  :type 'integer
+  :group 'org-todoist)
 
-(defvar org-todoist-duration-as-timestamp nil
-  "If non-nil, use timestamp for duration instead of effort.")
+(defcustom org-todoist-duration-as-timestamp nil
+  "If non-nil, use timestamp for duration instead of effort."
+  :type 'boolean
+  :group 'org-todoist)
 
-(defvar org-todoist-comment-tag-user-pretty nil
+(defcustom org-todoist-comment-tag-user-pretty nil
   "Whether tagging users in comments should be pretty.
 
 If non-nil use the org link representation for the comment tag so it
 looks nice when viewed in org mode. Else use the Todoist markdown representation
-so it looks nice in the Todoist app.")
+so it looks nice in the Todoist app."
+  :type 'boolean
+  :group 'org-todoist)
 
-(defvar org-todoist-storage-dir (concat (file-name-as-directory (xdg-cache-home)) "org-todoist")
+(defcustom org-todoist-storage-dir (concat (file-name-as-directory (xdg-cache-home)) "org-todoist")
   "The directory for org-todoist storage.
 
 If using multiple computers and a synced file solution,
-this directory must be accessible on all PCs running the sync command.")
+this directory must be accessible on all PCs running the sync command."
+  :type 'directory
+  :group 'org-todoist)
 
 (defun org-todoist-file ()
   "Gets the full path of the variable `org-todoist-file'."
@@ -1943,9 +2028,9 @@ RETURN a value representing if the buffer was modified."
   (save-current-buffer
     (let ((created (not (file-exists-p (org-todoist-file)))))
       (with-todoist-buffer!
-        (when created (org-todoist--insert-header)
-              (save-buffer))
-        (org-element-parse-buffer)))))
+       (when created (org-todoist--insert-header)
+             (save-buffer))
+       (org-element-parse-buffer)))))
 
                                         ;Find node;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--find-node (QUERY AST)
