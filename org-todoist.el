@@ -1332,7 +1332,7 @@ instead of id."
                                    ("args" . (,(org-todoist--id-arg id "item_uncomplete"))))
                                  commands))))))
                   ((and (not section) (string= type org-todoist--section-type) (not (string= org-todoist--default-section-name title)))
-                   (if (not oldtask)
+                   (if (and (not oldtask) hastid)
                        (progn
                          ;; new section
                          (org-todoist--insert-identifier hl org-todoist--section-type)
@@ -1357,6 +1357,8 @@ instead of id."
                                ("args" . (("id" . ,id))))
                              commands)))
 
+                     ;; Note, spurious section updates to the same name and id
+                     ;; occur if there is no sync buffer
                      (unless (string= title oldtitle)
                        ;; update section
                        (push `(("uuid" . ,(org-id-uuid))
@@ -1366,13 +1368,15 @@ instead of id."
                              commands))
                      (unless (cl-equalp proj oldproj)
                        ;; section_move
+                       ;; Note, spurious section to the same project_id
+                       ;; occur if there is no sync buffer
                        (push `(("uuid" . ,(org-id-uuid))
                                ("type" . "section_move")
                                ("args" . (("id" . ,id)
                                           ("project_id" . ,proj))))
                              commands))))
                   ((and (string= type org-todoist--project-type) (not (string= title "Inbox")))
-                   (if (not oldtask)
+                   (if (and (not oldtask) hastid)
                        ;; new project
                        (progn (org-todoist--insert-identifier hl org-todoist--project-type)
                               (push `(("uuid" . ,(org-id-uuid))
@@ -1383,6 +1387,8 @@ instead of id."
                                     commands))
                      (when (not (string= title (org-element-property :raw-value oldtask)))
                        ;; update project
+                       ;; Note, spurious project updates to the same name and id
+                       ;; occur if there is no sync buffer
                        (push `(("uuid" . ,(org-id-uuid))
                                ("type" . "project_update")
                                ("args" . (("name" . ,title)
