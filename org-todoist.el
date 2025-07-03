@@ -372,11 +372,11 @@ this directory must be accessible on all PCs running the sync command."
                                   org-todoist--api-version-prop)))
                        (unless (or (null vers) (string-blank-p vers))
                          (intern vers)))
-                       ;; No API version found, check for v9
-                       (when (org-todoist--is-v9 AST)
-                         'sync-v9)))
-                 ;; no todoist file or version found
-                 org-todoist--default-api-version)))
+                     ;; No API version found, check for v9
+                     (when (org-todoist--is-v9 AST)
+                       'sync-v9)))
+            ;; no todoist file or version found
+            org-todoist--default-api-version)))
 
                                         ;Hooks;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--item-close-hook ()
@@ -543,9 +543,8 @@ the Todoist project, section, and optionally parent task."
 
 (defun org-todoist--storage-file (FILE)
   "Determine full path of `FILE' relative to the `org-todoist-storage-dir'."
-  (let ((path (expand-file-name FILE org-todoist-storage-dir)))
-    (make-directory (file-name-directory path) t)
-    path))
+  (make-directory org-todoist-storage-dir t)
+  (expand-file-name FILE org-todoist-storage-dir))
 
 (defun org-todoist--set-sync-token (TOKEN)
   "Store that last Todoist sync `TOKEN'."
@@ -664,14 +663,9 @@ the Todoist project, section, and optionally parent task."
      (lambda (process event)
        (when (memq (process-status process) '(exit signal))
          (with-current-buffer (process-buffer process)
-           (let ((exit-code (process-exit-status process))
-                 (headers-end (save-excursion
-                                (goto-char (point-min))
-                                (search-forward "\r\n\r\n" nil t)))) ; Find end of headers
+           (let ((exit-code (process-exit-status process)))
              (if (= exit-code 0)
-                 (let* ((resp-body (if headers-end
-                                       (buffer-substring-no-properties headers-end (point-max))
-                                     (buffer-string)))
+                 (let* ((resp-body (buffer-string))
                         (response (json-read-from-string resp-body)))
                    (org-todoist--set-last-response resp-body)
                    (apply callback-fn (cons response callback-args)))
@@ -743,6 +737,8 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
 `OPEN' determines whether the Todoist buffer should be opened after sync."
   (when (or (null org-todoist-api-token) (not (stringp org-todoist-api-token)))
     (user-error "No org-todoist-api-token API token set"))
+  (unless (org-todoist--is-current-api)
+    (user-error "Org todoist has updated API versions! Run 'org-todoist-migrate-to-v1' to continue using org-todoist"))
   (setq org-todoist--sync-err nil)
   (let* ((cur-marker (point-marker))
          (ast (org-todoist--file-ast))
@@ -2891,7 +2887,7 @@ With prefix `ARG', include unassigned tasks.
         (org-todoist-my-id USER))
     (org-todoist-my-tasks current-prefix-arg USER)))
 
-;;;###autoload 
+;;;###autoload
 (defun org-todoist-ediff-snapshot ()
   "Compare current org-todoist file with last synced snapshot using ediff."
   (interactive)
