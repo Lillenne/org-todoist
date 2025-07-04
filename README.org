@@ -120,7 +120,7 @@ Simply create org headlines! The corresponding Todoist types (projects, subproje
 ** Updating projects, sections, and tasks
 Updating items happens automatically when updating any headline, description, todo-state, todo-keyword[fn:4], priority, effort, tag, scheduled time / range, deadline time, or assignee OR when any project, section, or task is moved under another headline. /This works with standard org commands (e.g., ~org-refile~)./
 ** Deleting items
-When the ~org-todoist-delete-remote-items~ variable is non-nil, removing items from the ~org-todoist-file~ (via deletion or refiling) will cause them to be deleted from Todoist. Additionally, items can be deleted by changing their ~todo-keyword~ to the ~org-todoist-deleted-keyword~.
+When the ~org-todoist-delete-remote-items~ variable is non-nil, removing items from the ~org-todoist-file~ (via deletion or refiling outside of the ~org-todoist-file~) will cause them to be deleted from Todoist. Additionally, items can be deleted by changing their ~todo-keyword~ to the ~org-todoist-deleted-keyword~.
 ** Tags, labels, and archiving
 Org tags are mapped directly to Todoist labels and support inherited tags. Note, inherited tags will also be applied directly to the child tasks on next sync.
 
@@ -267,10 +267,10 @@ If you are running an unsupported API version, the transient interface will aler
 *** Interface
 - ~org-todoist-show-n-levels~ - Fold level after sync:
   - nil = Don't change folds
-  - 2 = Show projects
-  - 3 = Show sections
-  - 4 = Show root tasks
-  - 5 = Show root tasks + 1 level of subtasks
+  - 1 = Show projects
+  - 2 = Show sections
+  - 3 = Show root tasks
+  - 4 = Show root tasks + 1 level of subtasks
   - 'no-fold = Expand everything
   - 'todo-tree = Show todo tree (default: nil)
 - ~org-todoist-comment-tag-user-pretty~ - Format user mentions as org links instead of markdown (default: nil)
@@ -280,9 +280,9 @@ If you are running an unsupported API version, the transient interface will aler
 - ~org-todoist-duration-as-timestamp~ - Use timestamp ranges instead of EFFORT property for duration (default: nil)
 - ~org-todoist-file~ - Todoist org filename (default: "todoist.org")
 - ~org-todoist-use-auto-reminder~ - Use default reminders for new tasks (default: t)
-- ~org-todoist-infer-project-for-capture~ - Use projectile project for capture templates (default: t)
+- ~org-todoist-infer-project-for-capture~ - Use the current projectile project for capture templates if found (default: t)
 - ~org-todoist-extract-deleted~ - Remove deleted items from org file (default: nil)
-- ~org-todoist-storage-dir~ - Storage directory for sync data (default: ~/.cache/org-todoist)
+- ~org-todoist-storage-dir~ - Storage directory for sync data (default: $XDG_CACHE_HOME/org-todoist)
 - ~org-todoist-command-batch-size~ - Maximum number of commands to send in a single sync request (default: 75)
 
 The Todoist API has a limit of 100 commands per request. When syncing large changes, org-todoist automatically batches commands into smaller chunks to avoid hitting this limit. The batch size can be configured via ~org-todoist-command-batch-size~ (defaults to 75 due to API 503 errors at 100 during development).
