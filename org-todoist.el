@@ -111,6 +111,14 @@ If relative, it is taken as relative to the org directory."
   :type 'string
   :group 'org-todoist)
 
+(defcustom org-todoist-url-scheme 'browser
+  "Open Todoist links with this URL scheme.
+Controls if `org-todoist-open-todoist-link' will open links with
+the browser or the app."
+  :type '(choice (const :tag "Open in browser" browser)
+          (const :tag "Open in app" app))
+  :group 'org-todoist)
+
 (defcustom org-todoist-user-headline "Collaborators"
   "The name of the root collaborators metadata node."
   :type 'string
@@ -2460,9 +2468,62 @@ Example: \"Submit report by tomorrow 5pm p2\""
                                    (alist-get 'content response)
                                    task-url))))))))
 
-(defun org-todoist--create-link (ID)
-  "Create a todoist link for `ID'."
-  (concat "todoist://task?id=" ID))
+(defun org-todoist--get-parent-id-of-type-no-ast (TYPE &optional POINT)
+  "Gets the parent(s) of node at `POINT' with TODOIST_TYPE `TYPE'.
+If `TYPE' is nil, returns the first parent of any todoist type."
+  (ignore-errors ; when top of tree is reached org will throw an error
+    (save-excursion
+      (when POINT (goto-char POINT))
+      (org-back-to-heading t)
+      (let ((found nil))
+        (while (and (not found) (org-up-heading-all 1))
+          (when-let ((type (org-entry-get nil org-todoist--type)))
+            (when (or (null TYPE) (string= type TYPE))
+              (setq found (org-entry-get nil org-todoist--id-property)))))
+        found))))
+
+
+(defun org-todoist--create-link (ID TYPE &optional ARG)
+  "Create a todoist link of `TYPE' for `ID' with `ARG'.
+
+`ARG' should be:
+TASK: nil
+SECTION: POINT int or project ID. Nil for current point.
+Only required in app scheme.
+PROJECT: nil
+SEARCH: search query string or nil."
+  (cond ((eq org-todoist-url-scheme 'browser)
+         (cond ((equal TYPE "TASK") (format "https://app.todoist.com/app/task/%s" ID))
+               ((equal TYPE "SECTION") (format "https://app.todoist.com/app/section/%s" ID))
+               ((equal TYPE "PROJECT") (format "https://app.todoist.com/app/project/%s" ID))
+               ((equal TYPE "PROJECTS") "https://app.todoist.com/app/projects/")
+               ((equal TYPE "QUICKADD") "https://app.todoist.com/add")
+               ((equal TYPE "SEARCH") (if (or (null ARG) (string-blank-p ARG))
+                                          "https://app.todoist.com/app/search"
+                                        (concat "https://app.todoist.com/app/search?query=" ARG)))
+               ((equal TYPE "UPCOMING") "https://app.todoist.com/app/upcoming")
+               ((equal TYPE "INBOX") "https://app.todoist.com/app/inbox")
+               ((equal TYPE "TODAY") "https://app.todoist.com/app/today")))
+        ((eq org-todoist-url-scheme 'app)
+         (cond ((equal TYPE org-todoist--task-type) (concat "todoist://task?id=" ID))
+               ((equal TYPE org-todoist--section-type)
+                (cond ((stringp ARG) (org-todoist--create-link ID org-todoist--project-type))
+                      (t (if-let ((proj (org-todoist--get-parent-id-of-type-no-ast
+                                         org-todoist--project-type
+                                         (or ARG (point)))))
+                             (org-todoist--create-link proj org-todoist--project-type)
+                           (user-error "Cannot open sections when org-todoist-url-scheme is 'app and no project found for section")))))
+               ((equal TYPE org-todoist--project-type) (concat "todoist://project?id=" ID))
+               ((equal TYPE "SEARCH") (if (or (null ARG) (string-blank-p ARG))
+                                          "todoist://search"
+                                        (concat "todoist://search?query=" ARG)))
+               ((equal TYPE "QUICKADD") "todoist://openquickadd")
+               ((null TYPE) "todoist://")
+               ((equal TYPE "PROJECTS") "todoist://projects")
+               ((equal TYPE "UPCOMING") "todoist://upcoming")
+               ((equal TYPE "INBOX") "todoist://inbox")
+               ((equal TYPE "TODAY") "todoist://today")))
+        (t (user-error "Variable org-todoist-url-scheme must be 'browser or 'app"))))
 
 ;;;###autoload
 (defun org-todoist-xdg-open-project ()
@@ -2473,7 +2534,11 @@ Example: \"Submit report by tomorrow 5pm p2\""
          (selected (completing-read "Open project: " project-names))
          (id (org-todoist--get-prop (--first (string= selected (org-element-property :raw-value it)) projects)
                                     org-todoist--id-property)))
-    (browse-url-xdg-open (format "todoist://project?id=%s" id))))
+    (browse-url-xdg-open (org-todoist--create-link id org-todoist--project-type))))
+
+(defun org-todoist--type-at-point (&optional point)
+  "Get the type of the Todoist item at `point'."
+  (org-entry-get point org-todoist--type))
 
 ;;;###autoload
 (defun org-todoist-jump-to-current-project ()
@@ -2512,14 +2577,12 @@ Example: \"Submit report by tomorrow 5pm p2\""
   "Open Todoist quick add panel in desktop app."
   ;; TODO not working with linux appimage?
   (interactive)
-  (browse-url-xdg-open "todoist://openquickadd"))
+  (browse-url-xdg-open (org-todoist--create-link nil "QUICKADD")))
 
 (defun org-todoist-xdg-open-search-query (QUERY)
   "Open a search in Todoist with `QUERY'."
   (interactive "sQuery: ")
-  (browse-url-xdg-open (if (string-blank-p QUERY)
-                           "todoist://search"
-                         (concat "todoist://search?query=" QUERY))))
+  (browse-url-xdg-open (org-todoist--create-link nil "SEARCH" QUERY)))
 
 ;;;###autoload
 (defun org-todoist-open-last-quick-task-in-app ()
@@ -2533,9 +2596,10 @@ Example: \"Submit report by tomorrow 5pm p2\""
 (defun org-todoist-xdg-open ()
   "Open task using xdg-open."
   (interactive)
-  (if (and (equal (org-todoist-file) (buffer-file-name))
-           (equal (org-entry-get nil org-todoist--type) org-todoist--task-type))
-      (browse-url-xdg-open (org-todoist--create-link (org-entry-get nil org-todoist--id-property)))
+  (if-let ((_ (equal (org-todoist-file) (buffer-file-name)))
+           (type (org-entry-get nil org-todoist--type))
+           (id (org-entry-get nil org-todoist--id-property)))
+      (browse-url-xdg-open (org-todoist--create-link id type))
     (org-todoist-xdg-open-task-search)))
 
 ;;;###autoload
@@ -2586,7 +2650,7 @@ Uses built-in completion without external dependencies."
          (id (cdr (assoc selection items))))
 
     (when id
-      (browse-url-xdg-open (org-todoist--create-link id)))))
+      (browse-url-xdg-open (org-todoist--create-link id org-todoist--task-type)))))
 
 ;;;###autoload
 (defun org-todoist-report-bug ()
@@ -3103,7 +3167,7 @@ Local changes that haven't been synced will be preserved during reset."
    [:description (lambda () (propertize "Open in App" 'face 'org-todoist-heading-face))
                  ("o" "Open Task" org-todoist-xdg-open)
                  ("p" "Open Project" org-todoist-xdg-open-project)
-                 ;; ("q" "Open Quick Add" org-todoist-xdg-open-quickadd)
+                 ("q" "Open Quick Add" org-todoist-xdg-open-quickadd)
                  ("/" "Open Search Query" org-todoist-xdg-open-search-query)
                  ("x" "Last Quick Task" org-todoist-open-last-quick-task-in-app)]
    [:description (lambda () (propertize "Diagnostics" 'face 'org-todoist-heading-face))
