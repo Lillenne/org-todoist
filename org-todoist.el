@@ -45,6 +45,7 @@
 
                                         ;Configuration Variables;;;;;;;;;;;;;;;
 (defvar url-http-end-of-headers) ;; defined in url, but emacs provides warning about free var when using
+(defvar auto-minor-mode-alist)
 (defvar org-todoist--cached-ast nil "Cached AST for the current org-todoist file.")
 
 (defgroup org-todoist nil
@@ -146,6 +147,12 @@ Currently this is ignored in favor of `current-time'."
   :type 'boolean
   :group 'org-todoist)
 
+(defcustom org-todoist-assignees-overlay t
+  "Whether to automatically show assignee overlays for all tasks.
+When enabled, assignee names will be displayed next to tasks automatically."
+  :type 'boolean
+  :group 'org-todoist)
+
 (defcustom org-todoist-infer-project-for-capture t
   "Whether to infer the active project in `org-capture'."
   :type 'boolean
@@ -229,9 +236,14 @@ viewing property drawers."
 (define-minor-mode org-todoist-mode
   "Minor mode for pretty display of Todoist org props."
   :lighter " TodoistPretty"
-  (if (and org-todoist-mode org-todoist-show-assignee-overlay-in-property-drawers)
-      (org-todoist-add-uid-overlays)
-    (org-todoist-remove-uid-overlays)))
+  (if org-todoist-mode
+      (progn
+        (when org-todoist-show-assignee-overlay-in-property-drawers
+          (org-todoist-add-uid-overlays))
+        (when org-todoist-assignees-overlay
+          (org-todoist-show-all-assignees)))
+    (org-todoist-remove-uid-overlays)
+    (remove-overlays (point-min) (point-max) 'org-todoist-assignee-overlay t)))
 
 (defun org-todoist--get-user-name (uid)
   "Get the name of user with ID `UID'."
@@ -461,7 +473,12 @@ this directory must be accessible on all PCs running the sync command."
            (message "item_close hook failed. See org-todoist--sync-err for details.")))))))
 
 ;; NOTE this requires it to be done from emacs and not eg. orgzly
-(add-hook 'org-after-todo-state-change-hook #'org-todoist--item-close-hook)
+(defun org-todoist--complete-recurring-task ()
+  (add-hook 'org-after-todo-state-change-hook #'org-todoist--item-close-hook))
+(add-hook 'org-todoist-mode-hook #'org-todoist--complete-recurring-task)
+
+
+(add-to-list 'auto-minor-mode-alist `(,(regexp-quote (org-todoist-file)) . org-todoist-mode))
 
 (add-to-list 'org-fold-show-context-detail '(todoist . lineage))
 
@@ -2474,6 +2491,15 @@ After user confirms, performs an incremental sync first, then full reset."
       (overlay-put ov 'org-todoist-assignee-overlay t)
       (add-hook 'before-change-functions (lambda (&rest _) (delete-overlay ov)) nil t))))
 
+;;;###autoload 
+(defun org-todoist-toggle-assignee-overlays ()
+  "Toggle automatic display of assignee overlays for all tasks."
+  (interactive)
+  (setq org-todoist-assignees-overlay (not org-todoist-assignees-overlay))
+  (if org-todoist-assignees-overlay
+      (org-todoist-show-all-assignees)
+    (remove-overlays (point-min) (point-max) 'org-todoist-assignee-overlay t)))
+
 ;;;###autoload
 (defun org-todoist-show-all-assignees ()
   "Display assigned collaborators for all tasks in the current buffer."
@@ -2481,6 +2507,7 @@ After user confirms, performs an incremental sync first, then full reset."
   (unless (string= (buffer-file-name) (org-todoist-file))
     (user-error "This command only works in the org-todoist buffer"))
   (let ((org-todoist--cached-ast (org-todoist--file-ast)))
+    (remove-overlays (point-min) (point-max) 'org-todoist-assignee-overlay t)
     (org-map-entries #'org-todoist-show-assignee)))
 
 ;;;###autoload
@@ -3282,7 +3309,7 @@ Local changes that haven't been synced will be preserved during reset."
                  ("J" "Current project" org-todoist-jump-to-current-project)
                  ("m" "My Agenda" org-todoist-my-tasks)
                  ("a" "User Agenda" org-todoist-view-user-tasks)
-                 ("G" "Show Assignees" org-todoist-show-all-assignees)]
+                 ("G" "Toggle Assignees" org-todoist-toggle-assignee-overlays)]
    [:description (lambda () (propertize "Open in browser" 'face 'org-todoist-heading-face))
     :if (lambda () (eq org-todoist-url-scheme 'browser))
     (org-todoist--url-scheme-suffix)
