@@ -279,7 +279,7 @@ this directory must be accessible on all PCs running the sync command."
 
 (defconst org-todoist--project-skip-list '(access description name color is_deleted is_favorite is_frozen sync_id view_style is_collapsed))
 
-(defconst org-todoist--section-skip-list '(name sync_id updated_at is_deleted archived_at is_collapsed))
+(defconst org-todoist--section-skip-list '(name sync_id is_deleted archived_at is_collapsed))
 
 (defconst org-todoist--task-skip-list '(role name completed_at is_deleted content duration description checked deadline due labels priority project_id section_id sync_id day_order is_collapsed))
 
@@ -2241,7 +2241,16 @@ Properties are added to `NODE' unless they are in plist `SKIP'.
 RETURNS the mutated `NODE'."
   (dolist (kv PROPERTIES)
     (unless (member (car kv) SKIP)
-      (org-todoist--add-prop NODE (car kv) (cdr kv))))
+      (let ((key (car kv))
+            (val (cdr kv)))
+        ;; Convert timestamps to inactive timestamp format
+        (if (and (or (eq key 'updated_at)
+                     (eq key 'added_at))
+                 val)
+            (org-todoist--add-prop NODE key
+                                   (org-todoist-org-element-to-string
+                                    (org-todoist--get-ts-from-date val t)))
+          (org-todoist--add-prop NODE key val)))))
   NODE)
 
 (defun org-todoist--get-todoist-type (NODE &optional NO-INFER)
@@ -3212,7 +3221,7 @@ Local changes that haven't been synced will be preserved during reset."
                  ("j" "Project" org-todoist-jump-to-project)
                  ("J" "Current project" org-todoist-jump-to-current-project)
                  ("m" "My Agenda" org-todoist-my-tasks)
-                 ("u" "User Agenda" org-todoist-view-user-tasks)
+                 ("a" "User Agenda" org-todoist-view-user-tasks)
                  ("G" "Show Assignees" org-todoist-show-all-assignees)]
    [:description (lambda () (propertize "Open in browser" 'face 'org-todoist-heading-face))
     :if (lambda () (eq org-todoist-url-scheme 'browser))
