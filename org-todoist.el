@@ -384,7 +384,7 @@ Automatically widens the buffer to ensure all content is accessible."
                         (buffer-substring-no-properties (point-min) (point-max)))))
 
 (defun org-todoist--is-current-api ()
-  "Check if the API version of the `org-todoist-file' is current."
+  "Check if the API version of the function `org-todoist-file' is current."
   (eq (org-todoist--api-version) org-todoist--default-api-version))
 
 (defun org-todoist--api-version ()
@@ -773,7 +773,10 @@ Send request with `ENCODED-DATA' and then call apply on
            (kill-buffer (process-buffer process))))))))
 
 (defun org-todoist--api-call-url-retrieve (encoded-data callback-fn callback-args &optional sync-request)
-  "Make an API call using `url-retrieve'."
+  "Make an API call using `url-retrieve'.
+Argument ENCODED-DATA is the form-encoded sync request data.
+Argument CALLBACK-FN is called with CALLBACK-ARGS after sync.
+Optional argument SYNC-REQUEST forces a synchronous call."
   (let ((url-request-method org-todoist-http-method)
         (url-request-extra-headers `(("Authorization" . ,(concat "Bearer " org-todoist-api-token))
                                      ("Content-Type" . ,org-todoist-request-type)))
@@ -2134,7 +2137,7 @@ If created, use `DEFAULT' text."
 
 
 (defun org-todoist--update-file (AST)
-  "Update the org-todoist file with changes from `AST'.
+  "Update the org-todoist file with diff from `AST'.
 Use diff to only apply changes rather than rewriting the entire file,
 preserving marks and point location.
 
@@ -2417,7 +2420,7 @@ This indicates v9 API IDs."
     (org-todoist--do-sync "*" (null ARG))))
 
 (defun org-todoist--verify-changes-before-reset (&optional ARG)
-  "Verify changes with user before performing a full sync reset.
+  "Verify diff with user before performing a full sync reset.
 Checks for pending sync commands first, then opens ediff if needed.
 After user confirms, performs an incremental sync first, then full reset.
 `ARG' is passed to `org-todoist--do-reset' if confirmed."
@@ -2494,7 +2497,7 @@ After user confirms, performs an incremental sync first, then full reset.
                                v)))))
 
 (defun org-todoist--id-is-v9 (id)
-  "String `ID' contains only numbers."
+  "String `ID' is composed of only numbers."
   (string-match-p "^[0-9]+$" id))
 
 ;; User functions
@@ -2517,7 +2520,7 @@ After user confirms, performs an incremental sync first, then full reset.
       (overlay-put ov 'after-string (propertize (concat "[@" name "] ") 'face 'org-todoist-beige-face))
       (overlay-put ov 'org-todoist-assignee-overlay t))))
 
-;;;###autoload 
+;;;###autoload
 (defun org-todoist-toggle-assignee-overlays ()
   "Toggle automatic display of assignee overlays for all tasks."
   (interactive)
@@ -2538,7 +2541,7 @@ After user confirms, performs an incremental sync first, then full reset.
 
 ;;;###autoload
 (defun org-todoist-capture-task ()
-  "Capture a new task in Todoist using org-capture."
+  "Capture a new task in Todoist using `org-capture'."
   (interactive)
   (unless org-todoist-api-token
     (user-error "Please set org-todoist-api-token"))
@@ -2956,7 +2959,7 @@ to the `org-todoist--ignored-node-type'."
         (insert "[[" (org-element-property :raw-value selectedelement) "][todoist-mention://" (org-todoist--id-or-temp-id selectedelement) "]")
       (insert "[" (org-element-property :raw-value selectedelement) "](todoist-mention://" (org-todoist--id-or-temp-id selectedelement) ")"))))
 
-;;;###autoload 
+;;;###autoload
 (defun org-todoist-toggle-todoist-mode ()
   "Toggle display of user IDs as names."
   (interactive)
@@ -2998,7 +3001,7 @@ When region is active, assign all tasks in the region to the selected user."
 ;;;###autoload
 (defun org-todoist-migrate-to-v1 ()
   "Migrate data from Todoist API v9 to v1.
-This function updates all Todoist IDs in `org-todoist-file' to the new
+This function updates all Todoist IDs in function `org-todoist-file' to the new
 format used by API v1. This should only be run once. It requires
 `org-todoist-api-token' to be set."
   (interactive)
@@ -3139,7 +3142,7 @@ With `ARG', do not open the Todoist buffer after sync."
   (org-todoist--do-sync (org-todoist--get-sync-token) (null ARG)))
 
 ;;;###autoload
-(defun org-todoist--reset (&optional ARG)
+(defun org-todoist-reset (&optional ARG)
   "Perform a full sync from Todoist.
 
 This function is often used in development, but end users will likely
@@ -3205,7 +3208,7 @@ Uses a bright green color to indicate active states.")
 
 (defun org-todoist--remote-deletion-display ()
   "Return formatted string showing remote deletion status.
-Shows if org-todoist-delete-remote-items is enabled or disabled."
+Shows if `org-todoist-delete-remote-items' is enabled or disabled."
   (format "Delete Remote Items: %s" (if org-todoist-delete-remote-items
                                         (propertize "Enabled" 'face 'org-todoist-enabled-face)
                                       (propertize "Disabled" 'face 'org-todoist-red-face))))
@@ -3330,7 +3333,7 @@ This affects how Todoist links are opened."
 
 ;;;###autoload
 (transient-define-prefix org-todoist-dispatch ()
-  "Org-Todoist interactive interface"
+  "Org-Todoist interactive interface."
   :refresh-suffixes t
   [[:description (lambda () (propertize "Org-Todoist\n" 'face 'org-todoist-title-face))
     :pad-keys t
@@ -3347,7 +3350,7 @@ This affects how Todoist links are opened."
    [:description (lambda () (propertize "Sync Operations" 'face 'org-todoist-heading-face))
                  ("s" "Sync" org-todoist-sync)
                  ("e" "Ediff Changes" org-todoist-ediff-snapshot)
-                 ("r" "Force Reset" org-todoist--reset)]
+                 ("r" "Force Reset" org-todoist-reset)]
    [:description (lambda () (propertize "Org View" 'face 'org-todoist-heading-face))
                  ("f" "Todoist File" org-todoist-goto)
                  ("j" "Project" org-todoist-jump-to-project)

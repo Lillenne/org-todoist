@@ -96,7 +96,7 @@ The following commands (and more!) are automatically available after installatio
 #+begin_src emacs-lisp
 ;; Sync commands and options:
 (org-todoist-sync &optional ARG)     ;; Perform incremental sync. With ARG, don't open buffer
-(org-todoist--reset &optional ARG)   ;; Full reset from Todoist. With prefix ARG (C-u):
+(org-todoist-reset &optional ARG)   ;; Full reset from Todoist. With prefix ARG (C-u):
                                     ;; - Single prefix: Don't open buffer
                                     ;; - Double prefix (C-u C-u): Delete and recreate file
 
