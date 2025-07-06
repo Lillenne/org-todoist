@@ -3066,13 +3066,23 @@ format used by API v1. This should only be run once. It requires
                              org-todoist--api-version-prop
                              (setq org-todoist--api-version 'v1))
 
-      ;; 5. Write updated AST to file
+      ;; 5. Remove 'description node properties
+        (org-element-map ast 'node-property
+            (lambda (node)
+            (when (equal (org-element-property :key node) "description")
+                (org-element-extract node))))
+
+      ;; 6. Write updated AST to file
       (org-todoist--update-file ast)
 
-      ;; 6. Update org-todoist--last-sync-buffer to use the updated ids
+      ;; 7. Update org-todoist--last-sync-buffer to use the updated ids
       (when (file-exists-p (org-todoist--storage-file org-todoist--sync-buffer-file))
         (with-current-buffer (find-file-noselect (org-todoist--storage-file org-todoist--sync-buffer-file))
           (org-mode)
+          ;; Remove description lines
+          (goto-char (point-min))
+          (while (re-search-forward "^:description:\\s-*\n" nil t)
+            (replace-match ""))
           (goto-char (point-min))
           (org-map-entries
            (lambda ()
