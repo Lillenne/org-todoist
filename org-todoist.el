@@ -44,10 +44,6 @@
 (require 'xdg)
 
                                         ;Configuration Variables;;;;;;;;;;;;;;;
-(defvar url-http-end-of-headers) ;; defined in url, but emacs provides warning about free var when using
-(defvar auto-minor-mode-alist)
-(defvar org-todoist--cached-ast nil "Cached AST for the current org-todoist file.")
-
 (defgroup org-todoist nil
   "Sync Todoist tasks to org mode and vice versa."
   :group 'external
@@ -185,8 +181,7 @@ nil=do not adjust folds
           (const :tag "Show root tasks + 1 level" 4)
           (const :tag "Show root tasks + 2 levels" 5)
           (const :tag "Show everything" no-fold)
-          (const :tag "Show todo tree" todo-tree)
-          (const :tag "I should setq to my desired number" nil))
+          (const :tag "Show todo tree" todo-tree))
   :group 'org-todoist)
 
 (defcustom org-todoist-todo-keyword "TODO"
@@ -234,8 +229,8 @@ viewing property drawers."
   :group 'org-todoist)
 
 (define-minor-mode org-todoist-mode
-  "Minor mode for pretty display of Todoist org props."
-  :lighter " TodoistPretty"
+  "Minor mode for Org-Todoist."
+  :lighter " Todoist"
   (if org-todoist-mode
       (progn
         (when org-todoist-show-assignee-overlay-in-property-drawers
@@ -245,49 +240,27 @@ viewing property drawers."
     (org-todoist-remove-uid-overlays)
     (remove-overlays (point-min) (point-max) 'org-todoist-assignee-overlay t)))
 
-(defun org-todoist--get-user-name (uid)
-  "Get the name of user with ID `UID'."
-  (when uid
-    (when-let* ((ast (org-todoist--file-ast))
-                (user (org-todoist--get-by-id org-todoist--collaborator-type uid ast)))
-      (org-element-property :raw-value user))))
-
-(defun org-todoist-add-uid-overlays ()
-  "Add overlays to display user names instead of IDs."
-  (interactive)
-  (let ((org-todoist--cached-ast (org-todoist--file-ast)))
-    (org-element-map org-todoist--cached-ast 'node-property
-      (lambda (prop)
-        (when (and (member (org-element-property :key prop nil t)
-                           '("responsible_uid" "added_by_uid" "user_id" "assigned_by_uid"))
-                   (org-element-property :value prop))
-          (let* ((uid (org-element-property :value prop))
-                 (name (org-todoist--get-user-name uid))
-                 (start (org-element-property :begin prop))
-                 (colon-pos (+ start 
-                              (length (org-element-property :key prop))
-                              2)) ; Add 2 for ": " after property name
-                 (value-start (save-excursion
-                               (goto-char (+ colon-pos 1))
-                               (skip-chars-forward " \t")
-                               (point))) ; Skip any extra spaces after colon
-                 (ov (make-overlay value-start (+ value-start (length uid)))))
-            (when name
-              (overlay-put ov 'display name)
-              (overlay-put ov 'org-todoist-uid t))))))))
-
-(defun org-todoist-remove-uid-overlays ()
-  "Remove overlays displaying user names."
-  (interactive)
-  (remove-overlays (point-min) (point-max) 'org-todoist-uid t))
-
-(defcustom org-todoist-storage-dir (concat (file-name-as-directory (xdg-cache-home)) "org-todoist")
+(defcustom org-todoist-storage-dir (concat (file-name-as-directory (xdg-cache-home))
+                                           "org-todoist")
   "The directory for org-todoist storage.
 
 If using multiple computers and a synced file solution,
 this directory must be accessible on all PCs running the sync command."
   :type 'directory
   :group 'org-todoist)
+
+(defvar url-http-end-of-headers) ;; silence byte compiler warning. Defined in url.el.
+(defvar org-todoist--cached-ast nil "Cached AST for the current org-todoist file.")
+
+(defmacro org-todoist--with-todoist-buffer! (&rest body)
+  "Execute `BODY' with a buffer visiting `ORG-TODOIST-FILE' as current.
+Automatically widens the buffer to ensure all content is accessible."
+  `(with-current-buffer
+       (org-todoist--get-todoist-buffer)
+     (save-restriction
+       (widen)
+       ,@body)))
+
 
 (defun org-todoist-file ()
   "Gets the full path of the variable `org-todoist-file'."
@@ -410,27 +383,27 @@ this directory must be accessible on all PCs running the sync command."
       (with-temp-buffer (insert-file-contents file)
                         (buffer-substring-no-properties (point-min) (point-max)))))
 
-(defun org-todoist--is-current-api (&optional AST)
+(defun org-todoist--is-current-api ()
   "Check if the API version of the `org-todoist-file' is current."
-  (eq (org-todoist--api-version AST) org-todoist--default-api-version))
+  (eq (org-todoist--api-version) org-todoist--default-api-version))
 
-(defun org-todoist--api-version (&optional AST)
+(defun org-todoist--api-version ()
   "Return the Todoist API version. Use parsed syntax tree `AST' if available."
   (setq org-todoist--api-version
         (or org-todoist--api-version
             ;; AST supplied, check for version in metadata node
-            (when AST
-              (let* ((md (org-todoist--metadata-node AST))
+            (when org-todoist--cached-ast
+              (let* ((md (org-todoist--metadata-node org-todoist--cached-ast))
                      (vers (org-todoist--get-prop md org-todoist--api-version-prop)))
                 ;; If version is set in metadata, use it
                 (or (unless (or (null vers) (string-blank-p vers))
                       (intern vers))
                     ;; If no version set, check for v9
-                    (when (org-todoist--is-v9 AST)
+                    (when (org-todoist--is-v9 org-todoist--cached-ast)
                       'sync-v9))))
             ;; otherwise try to find the version in the file
             (and (file-exists-p (org-todoist-file))
-                 (or (with-todoist-buffer!
+                 (or (org-todoist--with-todoist-buffer!
                       ;; quicker regexp search
                       (goto-char (point-min))
                       (when (and (re-search-forward (format org-complex-heading-regexp-format
@@ -439,15 +412,15 @@ this directory must be accessible on all PCs running the sync command."
                                  (not (s-blank? (org-entry-get nil org-todoist--api-version-prop))))
                         (intern (org-entry-get nil org-todoist--api-version-prop))))
                      ;; fallback to AST
-                     (let ((vers (org-todoist--get-prop
-                                  (org-todoist--metadata-node
-                                   (setq AST (org-todoist--file-ast)))
-                                  org-todoist--api-version-prop)))
-                       (unless (or (null vers) (string-blank-p vers))
-                         (intern vers)))
-                     ;; No API version found, check for v9
-                     (when (org-todoist--is-v9 AST)
-                       'sync-v9)))
+                     (let* ((AST (org-todoist--file-ast))
+                            (vers (org-todoist--get-prop
+                                   (org-todoist--metadata-node AST)
+                                   org-todoist--api-version-prop)))
+                       (if (and vers (not (string-blank-p vers)))
+                           (intern vers)
+                         ;; No API version found, check for v9
+                         (when (org-todoist--is-v9 AST)
+                           'sync-v9)))))
             ;; no todoist file or version found
             org-todoist--default-api-version)))
 
@@ -481,7 +454,6 @@ this directory must be accessible on all PCs running the sync command."
   (add-hook 'org-after-todo-state-change-hook #'org-todoist--item-close-hook nil t))
 
 (add-hook 'org-todoist-mode-hook #'org-todoist--complete-recurring-task)
-
 
 (add-to-list 'auto-minor-mode-alist `(,(regexp-quote (org-todoist-file)) . org-todoist-mode))
 
@@ -619,7 +591,6 @@ the Todoist project, section, and optionally parent task."
     "https://api.todoist.com/api/v1/sync")
    ((or (eq (org-todoist--api-version) 'sync-v9) )
     (error "Sync API v9 is deprecated! Run 'org-todoist-migrate-to-v1'"))))
-;; "https://api.todoist.com/sync/v9/sync")))
 
 (defun org-todoist--storage-file (FILE)
   "Determine full path of `FILE' relative to the `org-todoist-storage-dir'."
@@ -699,6 +670,42 @@ the Todoist project, section, and optionally parent task."
   "Get all headlines representing Todoist collaborators."
   (org-element-map (org-element-contents (org-todoist--user-node (org-todoist--file-ast))) 'headline #'identity))
 
+(defun org-todoist--get-user-name (uid)
+  "Get the name of user with ID `UID'."
+  (when uid
+    (when-let* ((ast (org-todoist--file-ast))
+                (user (org-todoist--get-by-id org-todoist--collaborator-type uid ast)))
+      (org-element-property :raw-value user))))
+
+(defun org-todoist-add-uid-overlays ()
+  "Add overlays to display user names instead of IDs."
+  (interactive)
+  (let ((org-todoist--cached-ast (org-todoist--file-ast)))
+    (org-element-map org-todoist--cached-ast 'node-property
+      (lambda (prop)
+        (when (and (member (org-element-property :key prop nil t)
+                           '("responsible_uid" "added_by_uid" "user_id" "assigned_by_uid"))
+                   (org-element-property :value prop))
+          (let* ((uid (org-element-property :value prop))
+                 (name (org-todoist--get-user-name uid))
+                 (start (org-element-property :begin prop))
+                 (colon-pos (+ start
+                               (length (org-element-property :key prop))
+                               2)) ; Add 2 for ": " after property name
+                 (value-start (save-excursion
+                                (goto-char (+ colon-pos 1))
+                                (skip-chars-forward " \t")
+                                (point))) ; Skip any extra spaces after colon
+                 (ov (make-overlay value-start (+ value-start (length uid)))))
+            (when name
+              (overlay-put ov 'display name)
+              (overlay-put ov 'org-todoist-uid t))))))))
+
+(defun org-todoist-remove-uid-overlays ()
+  "Remove overlays displaying user names."
+  (interactive)
+  (remove-overlays (point-min) (point-max) 'org-todoist-uid t))
+
 (defun org-todoist--encode (DATA)
   "Encode the Todoist sync API request alist `DATA'."
   (mapconcat
@@ -730,7 +737,9 @@ the Todoist project, section, and optionally parent task."
       (org-todoist--insert-id section org-todoist--default-id))))
 
 (defun org-todoist--api-call-curl (encoded-data callback-fn callback-args)
-  "Make an API call using `curl'."
+  "Make an API call using `curl'.
+Send request with `ENCODED-DATA' and then call apply on
+`CALLBACK-FN' with `CALLBACK-ARGS'."
   (let ((process-connection-type nil) ; Use a pipe
         (proc-buffer (generate-new-buffer " *org-todoist-curl*"))
         (command `("curl" "-s" "-X" ,org-todoist-http-method
@@ -740,7 +749,7 @@ the Todoist project, section, and optionally parent task."
                    ,(org-todoist--sync-endpoint))))
     (set-process-sentinel
      (apply #'start-process "org-todoist-curl" proc-buffer command)
-     (lambda (process event)
+     (lambda (process _event)
        (when (memq (process-status process) '(exit signal))
          (with-current-buffer (process-buffer process)
            (let ((exit-code (process-exit-status process)))
@@ -791,10 +800,10 @@ the Todoist project, section, and optionally parent task."
 
 (defun org-todoist--api-call (request-data callback-fn &optional callback-args sync-request)
   "Make an API call to Todoist sync endpoint.
-SYNC-REQUEST forces synchronous execution and blocks Emacs. Use sparingly.
-`request-data' is an alist of request parameters.
-`callback-fn' is a function to call with the JSON response.
-`callback-args' are additional arguments for the callback.
+`SYNC-REQUEST' forces synchronous execution and blocks Emacs. Use sparingly.
+`REQUEST-DATA' is an alist of request parameters.
+`CALLBACK-FN' is a function to call with the JSON response.
+`CALLBACK-ARGS' are additional arguments for the callback.
 Uses `curl' if available, otherwise falls back to `url-retrieve'."
   (unless (eq (org-todoist--api-version) 'v1)
     (user-error "Sync API v9 is deprecated! Run 'org-todoist-migrate-to-v1'"))
@@ -884,7 +893,7 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
 (defun org-todoist--do-sync-callback (response ast cur-marker)
   "The callback to invoke after syncing with the Todoist API.
 
-`response' is the parsed JSON response from the API.
+`RESPONSE' is the parsed JSON response from the API.
 `AST' is the current abstract syntax tree of the local Todoist buffer.
 `CUR-MARKER' is the marker at point when the sync was invoked."
   (if (null response)
@@ -898,15 +907,6 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
   (let* ((file (org-todoist-file))
          (fb (find-buffer-visiting file)))
     (or fb (find-file-noselect file))))
-
-(defmacro with-todoist-buffer! (&rest body)
-  "Execute `BODY' with a buffer visiting `ORG-TODOIST-FILE' as current.
-Automatically widens the buffer to ensure all content is accessible."
-  `(with-current-buffer
-       (org-todoist--get-todoist-buffer)
-     (save-restriction
-       (widen)
-       ,@body)))
 
 (defun org-todoist--handle-display (cur-marker)
   "Handle saving and folding of the Todoist buffer.
@@ -1018,7 +1018,7 @@ Automatically widens the buffer to ensure all content is accessible."
       (org-element-put-property TIMESTAMP :repeater-value (if (s-blank? (cadr match)) 1 (string-to-number (cadr match)))))))
 
 (defun org-todoist--get-repeater-symbol (TIME-UNIT-STRING)
-  "Get the corrent org repeater-unit symbol from `TIME-UNIT-STRING'."
+  "Get the current org repeater-unit symbol from `TIME-UNIT-STRING'."
   (cond
    ((s-contains? "week" TIME-UNIT-STRING t) 'week)
    ((s-contains? "day" TIME-UNIT-STRING t) 'day)
@@ -1061,14 +1061,14 @@ Else check scheduled only."
                                                                               TEXT)))))
     (if drawer
         (if-let ((children (org-element-contents drawer)))
-            (org-element-insert-before note (car children)) ; TODO this adds as first note in org, per standard org (todoist is the invers)
+            (org-element-insert-before note (car children)) ; TODO this adds as first note in org, per standard org (todoist is the inverse)
           (org-element-adopt drawer note))
       (setq drawer (org-element-create 'drawer '(:drawer-name "LOGBOOK") note))
       (org-todoist--adopt-drawer HL drawer)))
   HL)
 
-(defun org-todoist--first-direct-descendent-of-type (NODE TYPE)
-  "Get the first descendent from `NODE' of `TYPE'."
+(defun org-todoist--first-direct-descendant-of-type (NODE TYPE)
+  "Get the first descendant from `NODE' of `TYPE'."
   (let ((ptype (org-element-type NODE)))
     (org-element-map (org-element-contents NODE) TYPE
       (lambda (node) (when (eq NODE (org-todoist--first-parent-of-type node ptype))
@@ -1082,7 +1082,7 @@ the wrong headline!"
   ;; Check for a description to insert before
   (if (eq 'property-drawer (org-element-type DRAWER))
       ;; NOTE Having other drawers before property drawer makes property drawers parse as regular drawers. Avoid this.
-      (if-let ((first-drawer (org-todoist--first-direct-descendent-of-type HL 'drawer)))
+      (if-let ((first-drawer (org-todoist--first-direct-descendant-of-type HL 'drawer)))
           (org-element-insert-before DRAWER first-drawer) ; assume drawers are in front of description elements
         (org-todoist--adopt-drawer-regular HL DRAWER))
     (org-todoist--adopt-drawer-regular HL DRAWER)))
@@ -1126,6 +1126,9 @@ pretty-printed JSON commands."
   (message "Commands (as JSON) written to *todoist-push-test*"))
 
 (defun org-todoist--timestamp-from-start (TIMESTAMP)
+  "Create a new timestamp from the start properties of `TIMESTAMP'.
+Copies year-start, month-start, day-start, hour-start and minute-start
+properties from `TIMESTAMP' into a new timestamp element."
   (org-element-create 'timestamp
                       `(:year-start ,(org-element-property :year-start TIMESTAMP)
                         :month-start ,(org-element-property :month-start TIMESTAMP)
@@ -1134,6 +1137,9 @@ pretty-printed JSON commands."
                         :minute-start ,(org-element-property :minute-start TIMESTAMP))))
 
 (defun org-todoist--timestamp-from-end (TIMESTAMP)
+  "Create a new timestamp from the end properties of `TIMESTAMP'.
+Takes year-end, month-end, day-end, hour-end and minute-end properties
+from `TIMESTAMP' and creates a new timestamp with them as start properties."
   (org-element-create 'timestamp
                       `(:year-start ,(org-element-property :year-end TIMESTAMP)
                         :month-start ,(org-element-property :month-end TIMESTAMP)
@@ -1208,7 +1214,7 @@ Use this when pushing updates (we don't want to send id=default) to Todoist."
   org-todoist-my-id)
 
 (defun org-todoist--id-arg (id &optional command-type)
-  "Return the correct id argument for the current API version.
+  "Return the correct `ID' argument for `COMMAND-TYPE' in the current API version.
 For some commands like item_complete and item_delete, v9 API uses ids
 instead of id."
   (if (and (not (eq (org-todoist--api-version) 'v1))
@@ -1538,19 +1544,19 @@ instead of id."
       sorted-commands)))
 
 (defun org-todoist--is-subtask (NODE)
-  "If `NODE' is a headline representings a substask."
+  "If `NODE' is a headline representing a subtask."
   (org-todoist--get-parent-of-type org-todoist--task-type NODE t))
 
 (defun org-todoist--is-project (NODE)
-  "If `NODE' is a headline representings a project."
+  "If `NODE' is a headline representing a project."
   (string= (org-todoist--get-todoist-type NODE) org-todoist--project-type))
 
 (defun org-todoist--is-section (NODE)
-  "If `NODE' is a headline representings a section."
+  "If `NODE' is a headline representing a section."
   (string= (org-todoist--get-todoist-type NODE) org-todoist--section-type))
 
 (defun org-todoist--is-task (NODE)
-  "If `NODE' is a headline representings a task."
+  "If `NODE' is a headline representing a task."
   (string= (org-todoist--get-todoist-type NODE) org-todoist--task-type))
 
 (defun org-todoist--parse-response (RESPONSE AST)
@@ -1832,9 +1838,8 @@ When `INACTIVE', return an inactive timestamp."
 
     ;; Convert duration to timestamp range if enabled
     (when (and (eq SYMBOL 'due)
-           org-todoist-duration-as-timestamp
+               org-todoist-duration-as-timestamp
                (assoc-default 'duration TASK))
-      (setq tddid t)
       (when-let* ((duration (assoc-default 'duration TASK))
                   (amount (assoc-default 'amount duration))
                   (unit (assoc-default 'unit duration))
@@ -1858,10 +1863,9 @@ When `INACTIVE', return an inactive timestamp."
                                    ((eq type 'daterange)
                                     (format "%s--<%s>" start-str (format-time-string "%Y-%m-%d %H:%M" end-time)))))
                   (new-ts (org-timestamp-from-string range-str)))
-        (setq tdstart start-time tdend end-time tddstart decoded-start tddend decoded-end tdts ts tdrstr range-str)
         (org-element-put-property new-ts :range-type type)
         (setq ts new-ts)))
-    (setq tdfinal ts)))
+    ts))
 
 (defun org-todoist--timestamp-from-utc-str (STRING &optional WITH-TIME INACTIVE)
   "Create an an org mode timestamp element from `STRING'.
@@ -2125,7 +2129,7 @@ Use diff to only apply changes rather than rewriting the entire file,
 preserving marks and point location.
 
 RETURN a value representing if the buffer was modified."
-  (with-todoist-buffer!
+  (org-todoist--with-todoist-buffer!
    (let* ((new-str (org-todoist-org-element-to-string AST))
           (current-buf (current-buffer))
           (current-pos (point))
@@ -2152,14 +2156,14 @@ RETURN a value representing if the buffer was modified."
   (or org-todoist--cached-ast
       (save-current-buffer
         (let ((created (not (file-exists-p (org-todoist-file)))))
-          (with-todoist-buffer!
+          (org-todoist--with-todoist-buffer!
            (when created (org-todoist--insert-header)
                  (save-buffer))
            (org-element-parse-buffer))))))
 
                                         ;Find node;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--find-node (QUERY AST)
-  "Return the first headling in the syntax tree `AST' which matches `QUERY'.
+  "Return the first headline in the syntax tree `AST' which matches `QUERY'.
 `QUERY' takes a single argument which is the current node."
   (org-element-map AST 'headline (lambda (node) (when (funcall QUERY node) node)) nil t))
 
@@ -2373,7 +2377,8 @@ Note, a \n character is appended if not present."
   (string-replace " " "" STRING))
 
 (defun org-todoist--is-v9 (&optional AST)
-  "Check if any org-todoist-ids are numeric (indicates v9 API IDs)."
+  "Check if any org-todoist-ids in `AST' are numeric.
+This indicates v9 API IDs."
   (catch 'found
     (org-element-map (or AST (org-todoist--file-ast)) 'headline
       (lambda (hl)
@@ -2404,7 +2409,8 @@ Note, a \n character is appended if not present."
 (defun org-todoist--verify-changes-before-reset (&optional ARG)
   "Verify changes with user before performing a full sync reset.
 Checks for pending sync commands first, then opens ediff if needed.
-After user confirms, performs an incremental sync first, then full reset."
+After user confirms, performs an incremental sync first, then full reset.
+`ARG' is passed to `org-todoist--do-reset' if confirmed."
   (let* ((current-ast (org-todoist--file-ast))
          (last-sync-ast (org-todoist--get-last-sync-buffer-ast))
          (pending-commands (and last-sync-ast
@@ -2536,7 +2542,10 @@ After user confirms, performs an incremental sync first, then full reset."
 ;;;###autoload
 (defun org-todoist-quick-task (task-text note reminder)
   "Create a task in Todoist using natural language processing.
-TASK-TEXT should be a natural language task description with optional due date.
+`TASK-TEXT' should be a natural language task description with optional
+due date.
+`NOTE' is a comment to be added to the task.
+`REMINDER' is a natural language time string for the reminder, if desired.
 Example: \"Submit report by tomorrow 5pm p2\""
   (interactive (list (read-string "Task text: ")
                      (read-string "Comment (empty for none): ")
@@ -2643,7 +2652,7 @@ SEARCH: search query string or nil."
     (browse-url-xdg-open (org-todoist--create-link id org-todoist--project-type))))
 
 (defun org-todoist--type-at-point (&optional point)
-  "Get the type of the Todoist item at `point'."
+  "Get the type of the Todoist item at `POINT'."
   (org-entry-get point org-todoist--type))
 
 ;;;###autoload
@@ -2715,7 +2724,7 @@ SEARCH: search query string or nil."
   "Quickly select a project, section, or task and open in Todoist app.
 Uses built-in completion without external dependencies."
   (interactive)
-  (let* ((items (with-todoist-buffer!
+  (let* ((items (org-todoist--with-todoist-buffer!
                  (goto-char (point-min))
                  ;; sort the items by project and section. Within a section, sort by due data.
                  (--filter it (org-map-entries
@@ -2752,8 +2761,7 @@ Uses built-in completion without external dependencies."
                                                                'face 'org-link))
                                                 ,(when effort
                                                    (propertize (format "(%s)" effort) 'face 'org-special-keyword))))
-                                      id)
-                                     )))))))
+                                      id))))))))
          (selection (completing-read "Select Todoist item: " items))
          (id (cdr (assoc selection items))))
 
@@ -2878,7 +2886,7 @@ Includes last request, response, diff, and push information."
     (setq org-todoist--background-timer
           (run-at-time org-todoist-background-sync-offset
                        org-todoist-background-sync-interval
-                       #'org-todoist---sync))))
+                       #'org-todoist--do-background-sync))))
 
 ;;;###autoload
 (defun org-todoist-toggle-background-sync ()
@@ -2912,7 +2920,7 @@ When region is active, unassign all tasks in the region."
   "Do not push the subtree at point to Todoist.
 
 Only works on subtrees which are not already tracked by Todoist.
-Done by settings the `org-todoist-type' propety of the headline at point
+Done by settings the `org-todoist-type' property of the headline at point
 to the `org-todoist--ignored-node-type'."
   (interactive)
   (if (org-entry-get nil org-todoist--type)
@@ -3157,34 +3165,44 @@ Local changes that haven't been synced will be preserved during reset."
 
 (defface org-todoist-title-face
   '((t (:foreground "#E44232" :weight bold :height 1.2)))
-  "")
+  "Face for main title in the transient interface.
+Uses Todoist's official brand red color.")
 
 (defface org-todoist-heading-face
   '((t (:foreground "#E44232")))
-  "")
+  "Face for section headings in the transient interface.
+Uses Todoist's official brand red color.")
 
 (defface org-todoist-red-face
   '((t (:foreground "#E44232")))
-  "")
+  "Face for error states and disabled features.
+Uses Todoist's official brand red color.")
 
 (defface org-todoist-gray-face
   '((t (:foreground "#1E1E1E")))
-  "")
+  "Face for neutral or secondary text.
+Uses Todoist's official dark gray color.")
 
 (defface org-todoist-beige-face
   '((t (:foreground "#FFF9F3")))
-  "")
+  "Face for assignee overlays and other highlighted text.
+Uses Todoist's official light beige color.")
 
 (defface org-todoist-enabled-face
   '((t (:foreground "#009900" :weight bold)))
-  "Face for enabled todoist features in transient menu")
+  "Face for enabled features in the transient interface.
+Uses a bright green color to indicate active states.")
 
 (defun org-todoist--remote-deletion-display ()
+  "Return formatted string showing remote deletion status.
+Shows if org-todoist-delete-remote-items is enabled or disabled."
   (format "Delete Remote Items: %s" (if org-todoist-delete-remote-items
                                         (propertize "Enabled" 'face 'org-todoist-enabled-face)
                                       (propertize "Disabled" 'face 'org-todoist-red-face))))
 
 (defun org-todoist--background-sync-enabled-display ()
+  "Return formatted string showing background sync status.
+Shows if background sync timer is currently active or not."
   (format "Background Sync: %s" (if org-todoist--background-timer
                                     (propertize "Enabled" 'face 'org-todoist-enabled-face)
                                   (propertize "Disabled" 'face 'org-todoist-red-face))))
@@ -3204,6 +3222,8 @@ Local changes that haven't been synced will be preserved during reset."
             (cdr unit))))
 
 (defun org-todoist--api-version-display ()
+  "Return formatted string showing current Todoist API version.
+Includes warning if using deprecated API version."
   (format "API Version: %s" (let ((str (propertize (symbol-name (org-todoist--api-version))
                                                    'face
                                                    (if (org-todoist--is-current-api)
@@ -3251,11 +3271,15 @@ Local changes that haven't been synced will be preserved during reset."
     (org-todoist-background-sync)))
 
 (defun org-todoist--url-scheme-display ()
+  "Return formatted string showing current URL scheme setting.
+Shows if links will open in browser or app."
   (format "URL Scheme: %s"
           (propertize (symbol-name org-todoist-url-scheme)
                       'face 'org-todoist-enabled-face)))
 
 (defun org-todoist--toggle-url-scheme ()
+  "Toggle between browser and app URL schemes.
+This affects how Todoist links are opened."
   (interactive)
   (setq org-todoist-url-scheme
         (if (eq org-todoist-url-scheme 'browser)
