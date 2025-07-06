@@ -277,11 +277,11 @@ this directory must be accessible on all PCs running the sync command."
 
 (defconst org-todoist--sync-areas ["collaborators", "projects", "items", "sections"] "The types of Todoist items to sync.")
 
-(defconst org-todoist--project-skip-list '(access description name color is_deleted is_favorite is_frozen sync_id view_style is_collapsed))
+(defconst org-todoist--project-skip-list '(access description name color is_deleted is_favorite is_frozen sync_id view_style is_collapsed is_archived parent_id))
 
-(defconst org-todoist--section-skip-list '(name sync_id is_deleted archived_at is_collapsed))
+(defconst org-todoist--section-skip-list '(name sync_id updated_at is_deleted archived_at is_collapsed is_archived project_id))
 
-(defconst org-todoist--task-skip-list '(role name completed_at is_deleted content duration description checked deadline due labels priority project_id section_id sync_id day_order is_collapsed))
+(defconst org-todoist--task-skip-list '(role name completed_at is_deleted content duration description checked deadline due labels priority project_id section_id sync_id day_order is_collapsed note_count))
 
 (defconst org-todoist--sync-token-file "SYNC-TOKEN")
 
