@@ -350,8 +350,12 @@ curl https://api.todoist.com/api/v1/sync \
 * Disclaimer
 This package is not associated with, created by, or endorsed by [[https://doist.com/][Doist]] or [[https://orgmode.org/][Org]]
 
-* Author's notes
+* Author's notes and recommendations
 This is my first major elisp project, so I am almost certainly missing some best practices and useful tools. If you have any knowledge to share or want to contribute, please reach out, create an issue, or open a PR!
+
+This package adds a lot of properties to property drawers. If you'd prefer not to see them, I recomment (and personally use) [[https://github.com/jxq0/org-tidy][org-tidy]].
+
+If you set ~org-todoist--duration-as-timestamp~, you can easily perform daily timeblocking on Todoist tasks with [[https://github.com/ichernyshovvv/org-timeblock][org-timeblock]] from within Emacs. Alternatively, if you have /all/ of your org tasks on Todoist, Todoist does have a nice calendar interface now!
 
 * Footnotes
 

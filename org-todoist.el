@@ -455,7 +455,17 @@ Automatically widens the buffer to ensure all content is accessible."
 
 (add-hook 'org-todoist-mode-hook #'org-todoist--complete-recurring-task)
 
-(add-to-list 'auto-minor-mode-alist `(,(regexp-quote (org-todoist-file)) . org-todoist-mode))
+(defun org-todoist--activate-mode ()
+  "Activate `org-todoist-mode' for the current buffer."
+  (when (equal (buffer-file-name) (org-todoist-file))
+    (org-todoist-mode 1)))
+
+;; automatically activate org-todoist-mode for the todoist file
+(if (boundp 'auto-minor-mode-alist)
+    ;; hook into `auto-minor-mode-alist' if it exists. See https://github.com/joewreschnig/auto-minor-mode
+    (add-to-list 'auto-minor-mode-alist `(,(regexp-quote (org-todoist-file)) . org-todoist-mode))
+    ;; otherwise use `find-file-hook' to activate the mode
+  (add-hook 'find-file-hook #'org-todoist--activate-mode))
 
 (add-to-list 'org-fold-show-context-detail '(todoist . lineage))
 
@@ -2505,8 +2515,7 @@ After user confirms, performs an incremental sync first, then full reset.
          (ov (make-overlay pos pos)))
     (when name
       (overlay-put ov 'after-string (propertize (concat "[@" name "] ") 'face 'org-todoist-beige-face))
-      (overlay-put ov 'org-todoist-assignee-overlay t)
-      (add-hook 'before-change-functions (lambda (&rest _) (delete-overlay ov)) nil t))))
+      (overlay-put ov 'org-todoist-assignee-overlay t))))
 
 ;;;###autoload 
 (defun org-todoist-toggle-assignee-overlays ()
@@ -2948,7 +2957,7 @@ to the `org-todoist--ignored-node-type'."
       (insert "[" (org-element-property :raw-value selectedelement) "](todoist-mention://" (org-todoist--id-or-temp-id selectedelement) ")"))))
 
 ;;;###autoload 
-(defun org-todoist-toggle-pretty-uid ()
+(defun org-todoist-toggle-todoist-mode ()
   "Toggle display of user IDs as names."
   (interactive)
   (if (bound-and-true-p org-todoist-mode)
@@ -3158,7 +3167,8 @@ Local changes that haven't been synced will be preserved during reset."
   (let ((file (org-todoist-file)))
     (unless (or (not (file-exists-p file))
                 (equal (buffer-file-name) file))
-      (find-file file))))
+      (find-file file)
+      (org-todoist-mode 1))))
 
 ;; Transient interface and display functions
 (require 'transient)
@@ -3376,7 +3386,7 @@ This affects how Todoist links are opened."
    [:description (lambda () (propertize "Item Actions" 'face 'org-todoist-heading-face))
                  ("I" "Ignore Subtree" org-todoist-ignore-subtree)
                  ("A" "Add Subproject" org-todoist-add-subproject)
-                 ("h" "Toggle Pretty UIDs" org-todoist-toggle-pretty-uid)]
+                 ("h" "Toggle Pretty UIDs" org-todoist-toggle-todoist-mode)]
    [:description (lambda () (propertize "Diagnostics" 'face 'org-todoist-heading-face))
                  ("D" "Show Diagnostics" org-todoist-diagnose)
                  ("C" "Test Push Commands" org-todoist--push-test)
