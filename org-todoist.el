@@ -259,16 +259,19 @@ viewing property drawers."
     (org-element-map org-todoist--cached-ast 'node-property
       (lambda (prop)
         (when (and (member (org-element-property :key prop nil t)
-                           '("responsible_uid" "added_by_uid" "user_uid" "assigned_by_uid"))
-                   ;; '(:RESPONSIBLE_UID :ADDED_BY_UID :USER_UID :ASSIGNED_BY_UID))
+                           '("responsible_uid" "added_by_uid" "user_id" "assigned_by_uid"))
                    (org-element-property :value prop))
           (let* ((uid (org-element-property :value prop))
                  (name (org-todoist--get-user-name uid))
                  (start (org-element-property :begin prop))
                  (colon-pos (+ start 
-                               (length (org-element-property :key prop))
-                               3)) ; Add 2 for ": " after property name + one space
-                 (ov (make-overlay colon-pos (+ colon-pos (length uid)))))
+                              (length (org-element-property :key prop))
+                              2)) ; Add 2 for ": " after property name
+                 (value-start (save-excursion
+                               (goto-char (+ colon-pos 1))
+                               (skip-chars-forward " \t")
+                               (point))) ; Skip any extra spaces after colon
+                 (ov (make-overlay value-start (+ value-start (length uid)))))
             (when name
               (overlay-put ov 'display name)
               (overlay-put ov 'org-todoist-uid t))))))))
