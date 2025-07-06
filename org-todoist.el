@@ -970,7 +970,7 @@ Automatically widens the buffer to ensure all content is accessible."
                  ":"
                  (when (> 10 minute) "0") ; pad to 2 char with 0
                  (number-to-string minute)
-                 ":00.0"))))))
+                 ":00"))))))
 
 (defun org-todoist--todoist-date-object-for-kw (NODE KEYWORD)
   "Create the Todoist date JSON object for `KEYWORD' in `NODE'.
@@ -1820,16 +1820,45 @@ When `INACTIVE', return an inactive timestamp."
 
 (defun org-todoist--get-timestamp (SYMBOL TASK)
   "Get a timestamp object for scheduled, deadline, or closed `SYMBOL' under `TASK'."
-  (org-todoist--get-timestamp2 (assoc-default SYMBOL TASK)))
-
-(defun org-todoist--get-timestamp2 (DATEOBJ)
-  "Create a timestamp from a Todoist `DATEOBJ'."
-  (when-let* ((date (assoc-default 'date DATEOBJ))
+  (when-let* ((DATEOBJ (assoc-default SYMBOL TASK))
+              (date (assoc-default 'date DATEOBJ))
               (hasdate (org-todoist--has-date date))
               (ts (org-todoist--get-ts-from-date date)))
     (when (eq t (assoc-default 'is_recurring DATEOBJ))
       (org-todoist--add-repeater ts (assoc-default 'string DATEOBJ)))
-    ts))
+
+    ;; Convert duration to timestamp range if enabled
+    (when (and (eq SYMBOL 'due)
+           org-todoist-duration-as-timestamp
+               (assoc-default 'duration TASK))
+      (setq tddid t)
+      (when-let* ((duration (assoc-default 'duration TASK))
+                  (amount (assoc-default 'amount duration))
+                  (unit (assoc-default 'unit duration))
+                  (seconds (pcase unit
+                             ("minute" (* amount 60))
+                             ("hour" (* amount 3600))
+                             ("day" (* amount 86400))
+                             (_ 0)))
+                  (start-str (org-todoist-org-element-to-string ts))
+                  (start-time (org-time-string-to-time start-str))
+                  (end-time (time-add start-time (seconds-to-time seconds)))
+                  (decoded-start (decode-time start-time))
+                  (decoded-end (decode-time end-time))
+                  (type (if (equal (nth 3 decoded-end) (nth 3 decoded-start)) ; presumes the duration isn't exactly a month or day
+                            'timerange
+                          'daterange))
+                  (range-str (cond ((eq type 'timerange)
+                                    (concat (format-time-string "[%Y-%m-%d %H:%M" start-time)
+                                            "-"
+                                            (format-time-string "%H:%M]" end-time)))
+                                   ((eq type 'daterange)
+                                    (format "%s--<%s>" start-str (format-time-string "%Y-%m-%d %H:%M" end-time)))))
+                  (new-ts (org-timestamp-from-string range-str)))
+        (setq tdstart start-time tdend end-time tddstart decoded-start tddend decoded-end tdts ts tdrstr range-str)
+        (org-element-put-property new-ts :range-type type)
+        (setq ts new-ts)))
+    (setq tdfinal ts)))
 
 (defun org-todoist--timestamp-from-utc-str (STRING &optional WITH-TIME INACTIVE)
   "Create an an org mode timestamp element from `STRING'.
@@ -1858,29 +1887,6 @@ inactive."
         (sch (org-todoist--scheduled-date TASK))
         (dead (org-todoist--deadline-date TASK))
         (closed (org-todoist--closed-date TASK)))
-    ;; Convert duration to timestamp range if enabled
-    (when (and org-todoist-duration-as-timestamp
-               sch
-               (assoc-default 'duration TASK))
-      (when-let* ((duration (assoc-default 'duration TASK))
-                  (amount (assoc-default 'amount duration))
-                  (unit (assoc-default 'unit duration))
-                  (start-str (org-todoist-org-element-to-string sch))
-                  (start-time (org-time-string-to-time start-str))
-                  (seconds (pcase unit
-                             ("minute" (* amount 60))
-                             ("hour" (* amount 3600))
-                             ("day" (* amount 86400))
-                             (_ 0)))
-                  (end-time (time-add start-time (seconds-to-time seconds)))
-                  (end-str (format-time-string "%Y-%m-%d %H:%M" end-time))
-                  (range-str (format "%s--<%s>" start-str end-str))
-                  (ts (org-timestamp-from-string range-str)))
-        (when (eql (org-element-property :day-end ts)
-                   (org-element-property :day-start ts))
-          (org-element-put-property ts :range-type 'time-range)
-          (org-element-put-property ts :raw-value nil))
-        (setq sch ts)))
     (when sch (setq props (plist-put props :scheduled sch)))
     (when dead (setq props (plist-put props :deadline dead)))
     (when closed (setq props (plist-put props :closed closed)))
