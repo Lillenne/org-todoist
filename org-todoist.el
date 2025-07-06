@@ -45,6 +45,7 @@
 
                                         ;Configuration Variables;;;;;;;;;;;;;;;
 (defvar url-http-end-of-headers) ;; defined in url, but emacs provides warning about free var when using
+(defvar org-todoist--cached-ast nil "Cached AST for the current org-todoist file.")
 
 (defgroup org-todoist nil
   "Sync Todoist tasks to org mode and vice versa."
@@ -217,6 +218,54 @@ so it looks nice in the Todoist app."
   :type 'boolean
   :group 'org-todoist)
 
+(defcustom org-todoist-show-assignee-overlay-in-property-drawers nil
+  "Whether to show assignee names in property drawers as overlays.
+When enabled, responsible_uid properties will be displayed as user names.
+May effect performance on large files. Recommended to only enable when
+viewing property drawers."
+  :type 'boolean
+  :group 'org-todoist)
+
+(define-minor-mode org-todoist-mode
+  "Minor mode for pretty display of Todoist org props."
+  :lighter " TodoistPretty"
+  (if (and org-todoist-mode org-todoist-show-assignee-overlay-in-property-drawers)
+      (org-todoist-add-uid-overlays)
+    (org-todoist-remove-uid-overlays)))
+
+(defun org-todoist--get-user-name (uid)
+  "Get the name of user with ID `UID'."
+  (when uid
+    (when-let* ((ast (org-todoist--file-ast))
+                (user (org-todoist--get-by-id org-todoist--collaborator-type uid ast)))
+      (org-element-property :raw-value user))))
+
+(defun org-todoist-add-uid-overlays ()
+  "Add overlays to display user names instead of IDs."
+  (interactive)
+  (let ((org-todoist--cached-ast (org-todoist--file-ast)))
+    (org-element-map org-todoist--cached-ast 'node-property
+      (lambda (prop)
+        (when (and (member (org-element-property :key prop nil t)
+                           '("responsible_uid" "added_by_uid" "user_uid" "assigned_by_uid"))
+                   ;; '(:RESPONSIBLE_UID :ADDED_BY_UID :USER_UID :ASSIGNED_BY_UID))
+                   (org-element-property :value prop))
+          (let* ((uid (org-element-property :value prop))
+                 (name (org-todoist--get-user-name uid))
+                 (start (org-element-property :begin prop))
+                 (colon-pos (+ start 
+                               (length (org-element-property :key prop))
+                               3)) ; Add 2 for ": " after property name + one space
+                 (ov (make-overlay colon-pos (+ colon-pos (length uid)))))
+            (when name
+              (overlay-put ov 'display name)
+              (overlay-put ov 'org-todoist-uid t))))))))
+
+(defun org-todoist-remove-uid-overlays ()
+  "Remove overlays displaying user names."
+  (interactive)
+  (remove-overlays (point-min) (point-max) 'org-todoist-uid t))
+
 (defcustom org-todoist-storage-dir (concat (file-name-as-directory (xdg-cache-home)) "org-todoist")
   "The directory for org-todoist storage.
 
@@ -242,6 +291,7 @@ this directory must be accessible on all PCs running the sync command."
   "Timer for running background syncs.")
 
 (defvar org-todoist--api-version nil "Previously used API version. Detected by Todoist.")
+
                                         ;Constants;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defconst org-todoist--default-api-version 'v1)
 
@@ -2071,12 +2121,13 @@ RETURN a value representing if the buffer was modified."
 
 (defun org-todoist--file-ast ()
   "Parse the AST of the `'org-todoist-file'."
-  (save-current-buffer
-    (let ((created (not (file-exists-p (org-todoist-file)))))
-      (with-todoist-buffer!
-       (when created (org-todoist--insert-header)
-             (save-buffer))
-       (org-element-parse-buffer)))))
+  (or org-todoist--cached-ast
+      (save-current-buffer
+        (let ((created (not (file-exists-p (org-todoist-file)))))
+          (with-todoist-buffer!
+           (when created (org-todoist--insert-header)
+                 (save-buffer))
+           (org-element-parse-buffer))))))
 
                                         ;Find node;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--find-node (QUERY AST)
@@ -2429,7 +2480,8 @@ After user confirms, performs an incremental sync first, then full reset."
   (interactive)
   (unless (string= (buffer-file-name) (org-todoist-file))
     (user-error "This command only works in the org-todoist buffer"))
-  (org-map-entries #'org-todoist-show-assignee))
+  (let ((org-todoist--cached-ast (org-todoist--file-ast)))
+    (org-map-entries #'org-todoist-show-assignee)))
 
 ;;;###autoload
 (defun org-todoist-capture-task ()
@@ -2849,6 +2901,14 @@ to the `org-todoist--ignored-node-type'."
         (insert "[[" (org-element-property :raw-value selectedelement) "][todoist-mention://" (org-todoist--id-or-temp-id selectedelement) "]")
       (insert "[" (org-element-property :raw-value selectedelement) "](todoist-mention://" (org-todoist--id-or-temp-id selectedelement) ")"))))
 
+;;;###autoload 
+(defun org-todoist-toggle-pretty-uid ()
+  "Toggle display of user IDs as names."
+  (interactive)
+  (if (bound-and-true-p org-todoist-mode)
+      (org-todoist-mode -1)
+    (org-todoist-mode 1)))
+
 ;;;###autoload
 (defun org-todoist-assign-task ()
   "Prompt for collaborator selection and assign task(s) at point.
@@ -3253,7 +3313,8 @@ Local changes that haven't been synced will be preserved during reset."
     ("u" "Upcoming" org-todoist-xdg-open-upcoming)]
    [:description (lambda () (propertize "Item Actions" 'face 'org-todoist-heading-face))
                  ("I" "Ignore Subtree" org-todoist-ignore-subtree)
-                 ("A" "Add Subproject" org-todoist-add-subproject)]
+                 ("A" "Add Subproject" org-todoist-add-subproject)
+                 ("h" "Toggle Pretty UIDs" org-todoist-toggle-pretty-uid)]
    [:description (lambda () (propertize "Diagnostics" 'face 'org-todoist-heading-face))
                  ("D" "Show Diagnostics" org-todoist-diagnose)
                  ("C" "Test Push Commands" org-todoist--push-test)
