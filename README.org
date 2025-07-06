@@ -196,6 +196,8 @@ Sample capture templates:
 
 ** Quirks
 - Once a task has been permanently deleted in Todoist, changing the TODO state in org will be reset back to ~org-todoist-deleted-keyword~ on next sync. Todoist does not support reviving permanently deleted tasks.
+- *Deadlines do not support time of day* and will be truncated to only include the date on the next sync. This is a limitation with Todoist.
+- Adding durations via quick task requests does not work. This is on the Todoist side [2025-07-06 Sun].
 - Comments on subtasks are added to both the root task and the subtask on Todoist, which is reflected here.
 - The org element API does not properly parse property drawers if anything besides is put above them (e.g. adding your description above the property drawer), so don't do that!
 ** Remaining unsupported features
@@ -274,6 +276,9 @@ If you are running an unsupported API version, the transient interface will aler
   - 'no-fold = Expand everything
   - 'todo-tree = Show todo tree (default: nil)
 - ~org-todoist-comment-tag-user-pretty~ - Format user mentions as org links instead of markdown (default: nil)
+- ~org-todoist-mode~ - Minor mode for displaying user mentions and UIDs as human-readable names:
+  - ~org-todoist-assignees-overlay~ - Show assignee names next to tasks automatically (default: t)
+  - ~org-todoist-show-assignee-overlay-in-property-drawers~ - Display responsible_uid properties as user names (default: nil)
 
 *** Behavior
 - ~org-todoist-delete-remote-items~ - Delete items removed from org file (default: nil)

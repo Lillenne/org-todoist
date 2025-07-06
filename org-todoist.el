@@ -474,7 +474,9 @@ this directory must be accessible on all PCs running the sync command."
 
 ;; NOTE this requires it to be done from emacs and not eg. orgzly
 (defun org-todoist--complete-recurring-task ()
-  (add-hook 'org-after-todo-state-change-hook #'org-todoist--item-close-hook))
+  "Add a hook to complete recurring tasks."
+  (add-hook 'org-after-todo-state-change-hook #'org-todoist--item-close-hook nil t))
+
 (add-hook 'org-todoist-mode-hook #'org-todoist--complete-recurring-task)
 
 
