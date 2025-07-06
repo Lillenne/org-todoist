@@ -229,8 +229,8 @@ this directory must be accessible on all PCs running the sync command."
   "Gets the full path of the variable `org-todoist-file'."
   (expand-file-name org-todoist-file org-directory))
 
-(defvar org-todoist--last-quick-task-url nil
-  "Stores the url of the last quick task.")
+(defvar org-todoist--last-quick-task-id nil
+  "Stores the id of the last quick task.")
 
 (defvar org-todoist-background-sync-offset 30
   "Delay after calling `org-todoist-background-sync' for initial run.")
@@ -2461,12 +2461,11 @@ Example: \"Submit report by tomorrow 5pm p2\""
                         (message "Error creating task: %s" http-error)
                       (with-current-buffer (current-buffer)
                         (goto-char url-http-end-of-headers)
-                        (let* ((response (json-read))
-                               (task-url (org-todoist--create-link (alist-get 'id response))))
-                          (setq org-todoist--last-quick-task-url task-url)
+                        (let ((response (json-read)))
+                          (setq org-todoist--last-quick-task-id (alist-get 'id response))
                           (message "Task created: %s (%s)"
                                    (alist-get 'content response)
-                                   task-url))))))))
+                                   org-todoist--last-quick-task-id))))))))
 
 (defun org-todoist--get-parent-id-of-type-no-ast (TYPE &optional POINT)
   "Gets the parent(s) of node at `POINT' with TODOIST_TYPE `TYPE'.
@@ -2493,14 +2492,23 @@ Only required in app scheme.
 PROJECT: nil
 SEARCH: search query string or nil."
   (cond ((eq org-todoist-url-scheme 'browser)
-         (cond ((equal TYPE "TASK") (format "https://app.todoist.com/app/task/%s" ID))
-               ((equal TYPE "SECTION") (format "https://app.todoist.com/app/section/%s" ID))
+         (cond ((null TYPE) "https://app.todoist.com/app/")
+               ((equal TYPE "TASK") (format "https://app.todoist.com/app/task/%s" ID))
+               ((equal TYPE "LASTQUICKTASK") (format "https://app.todoist.com/app/task/%s" org-todoist--last-quick-task-id))
+               ((equal TYPE "SECTION")
+                (cond ((not (equal ID org-todoist--default-id)) (format "https://app.todoist.com/app/section/%s" ID))
+                      ;; passed project id
+                      ((stringp ARG) (org-todoist--create-link ID org-todoist--project-type))
+                      ;; try to get parent project from passed point or current point
+                      (t (if-let ((proj (org-todoist--get-parent-id-of-type-no-ast
+                                         org-todoist--project-type
+                                         (or ARG (point)))))
+                             (org-todoist--create-link proj org-todoist--project-type)
+                           (user-error "Cannot open sections when org-todoist-url-scheme is 'browser and no project found for section")))))
                ((equal TYPE "PROJECT") (format "https://app.todoist.com/app/project/%s" ID))
                ((equal TYPE "PROJECTS") "https://app.todoist.com/app/projects/")
                ((equal TYPE "QUICKADD") "https://app.todoist.com/add")
-               ((equal TYPE "SEARCH") (if (or (null ARG) (string-blank-p ARG))
-                                          "https://app.todoist.com/app/search"
-                                        (concat "https://app.todoist.com/app/search?query=" ARG)))
+               ((equal TYPE "SEARCH") (concat "https://app.todoist.com/app/search/" (or ARG (read-string "Search query: "))))
                ((equal TYPE "UPCOMING") "https://app.todoist.com/app/upcoming")
                ((equal TYPE "INBOX") "https://app.todoist.com/app/inbox")
                ((equal TYPE "TODAY") "https://app.todoist.com/app/today")))
@@ -2514,10 +2522,9 @@ SEARCH: search query string or nil."
                              (org-todoist--create-link proj org-todoist--project-type)
                            (user-error "Cannot open sections when org-todoist-url-scheme is 'app and no project found for section")))))
                ((equal TYPE org-todoist--project-type) (concat "todoist://project?id=" ID))
-               ((equal TYPE "SEARCH") (if (or (null ARG) (string-blank-p ARG))
-                                          "todoist://search"
-                                        (concat "todoist://search?query=" ARG)))
-               ((equal TYPE "QUICKADD") "todoist://openquickadd")
+               ((equal TYPE "SEARCH") (concat "todoist://search?query=" (or ARG (read-string "Search query: "))))
+               ((equal TYPE "QUICKADD") "todoist://openquickadd") ;; TODO doesn't work
+               ((equal TYPE "LASTQUICKTASK") (concat "todoist://task?id=" org-todoist--last-quick-task-id))
                ((null TYPE) "todoist://")
                ((equal TYPE "PROJECTS") "todoist://projects")
                ((equal TYPE "UPCOMING") "todoist://upcoming")
@@ -2588,9 +2595,11 @@ SEARCH: search query string or nil."
 (defun org-todoist-open-last-quick-task-in-app ()
   "Xdg-open the last quick task url."
   (interactive)
-  (unless org-todoist--last-quick-task-url
+  (unless org-todoist--last-quick-task-id
     (user-error "No previous quick task!"))
-  (browse-url-xdg-open org-todoist--last-quick-task-url))
+  (browse-url-xdg-open (org-todoist--create-link
+                        org-todoist--last-quick-task-id
+                        org-todoist--task-type)))
 
 ;;;###autoload
 (defun org-todoist-xdg-open ()
@@ -3134,6 +3143,50 @@ Local changes that haven't been synced will be preserved during reset."
       (setq org-todoist--background-timer nil))
     (org-todoist-background-sync)))
 
+(defun org-todoist--url-scheme-display ()
+  (format "URL Scheme: %s"
+          (propertize (symbol-name org-todoist-url-scheme)
+                      'face 'org-todoist-enabled-face)))
+
+(defun org-todoist--toggle-url-scheme ()
+  (interactive)
+  (setq org-todoist-url-scheme
+        (if (eq org-todoist-url-scheme 'browser)
+            'app
+          'browser)))
+
+(transient-define-suffix org-todoist--url-scheme-suffix ()
+  :transient t
+  :key "U"
+  :description #'org-todoist--url-scheme-display
+  (interactive)
+  (org-todoist--toggle-url-scheme))
+
+(defun org-todoist-xdg-open-main-view ()
+  "Open the main Todoist view."
+  (interactive)
+  (browse-url-xdg-open (org-todoist--create-link nil nil)))
+
+(defun org-todoist-xdg-open-upcoming ()
+  "Open the Todoist upcoming view."
+  (interactive)
+  (browse-url-xdg-open (org-todoist--create-link nil "UPCOMING")))
+
+(defun org-todoist-xdg-open-inbox ()
+  "Open the Todoist inbox."
+  (interactive)
+  (browse-url-xdg-open (org-todoist--create-link nil "INBOX")))
+
+(defun org-todoist-xdg-open-today ()
+  "Open the Todoist today view."
+  (interactive)
+  (browse-url-xdg-open (org-todoist--create-link nil "TODAY")))
+
+(defun org-todoist-xdg-open-projects ()
+  "Open the Todoist projects view."
+  (interactive)
+  (browse-url-xdg-open (org-todoist--create-link nil "PROJECTS")))
+
 ;;;###autoload
 (transient-define-prefix org-todoist-dispatch ()
   "Org-Todoist interactive interface"
@@ -3148,7 +3201,7 @@ Local changes that haven't been synced will be preserved during reset."
                  ("q" "Quick Task" org-todoist-quick-task)
                  ("c" "Org Capture" org-todoist-capture-task)
                  ("g" "Assign" org-todoist-assign-task)
-                 ("u" "Unassign" org-todoist-unassign-task)
+                 ("n" "Unassign" org-todoist-unassign-task)
                  ("@" "Tag User" org-todoist-tag-user)]
    [:description (lambda () (propertize "Sync Operations" 'face 'org-todoist-heading-face))
                  ("s" "Sync" org-todoist-sync)
@@ -3161,18 +3214,40 @@ Local changes that haven't been synced will be preserved during reset."
                  ("m" "My Agenda" org-todoist-my-tasks)
                  ("u" "User Agenda" org-todoist-view-user-tasks)
                  ("G" "Show Assignees" org-todoist-show-all-assignees)]
+   [:description (lambda () (propertize "Open in browser" 'face 'org-todoist-heading-face))
+    :if (lambda () (eq org-todoist-url-scheme 'browser))
+    (org-todoist--url-scheme-suffix)
+    ("." "Open at point" org-todoist-xdg-open)
+    ("o" "Open Task" org-todoist-xdg-open-task-search)
+    ("p" "Open Project" org-todoist-xdg-open-project)
+    ("P" "Projects" org-todoist-xdg-open-projects)
+    ("Q" "Open Quick Add" org-todoist-xdg-open-quickadd)
+    ("/" "Open Search Query" org-todoist-xdg-open-search-query)
+    ("x" "Last Quick Task" org-todoist-open-last-quick-task-in-app)
+    ("t" "Today" org-todoist-xdg-open-today)
+    ("i" "Inbox" org-todoist-xdg-open-inbox)
+    ("v" "Main View" org-todoist-xdg-open-main-view)
+    ("u" "Upcoming" org-todoist-xdg-open-upcoming)]
+   [:description (lambda () (propertize "Open in app" 'face 'org-todoist-heading-face))
+    :if (lambda () (eq org-todoist-url-scheme 'app))
+    (org-todoist--url-scheme-suffix)
+    ("." "Open at point" org-todoist-xdg-open)
+    ("o" "Open Task" org-todoist-xdg-open-task-search)
+    ("p" "Open Project" org-todoist-xdg-open-project)
+    ("P" "Projects" org-todoist-xdg-open-projects)
+    ("Q" "Open Quick Add" org-todoist-xdg-open-quickadd)
+    ("/" "Open Search Query" org-todoist-xdg-open-search-query)
+    ("x" "Last Quick Task" org-todoist-open-last-quick-task-in-app)
+    ("t" "Today" org-todoist-xdg-open-today)
+    ("i" "Inbox" org-todoist-xdg-open-inbox)
+    ("v" "Main View" org-todoist-xdg-open-main-view)
+    ("u" "Upcoming" org-todoist-xdg-open-upcoming)]
    [:description (lambda () (propertize "Item Actions" 'face 'org-todoist-heading-face))
-                 ("i" "Ignore Subtree" org-todoist-ignore-subtree)
-                 ("a" "Add Subproject" org-todoist-add-subproject)]
-   [:description (lambda () (propertize "Open in App" 'face 'org-todoist-heading-face))
-                 ("o" "Open Task" org-todoist-xdg-open)
-                 ("p" "Open Project" org-todoist-xdg-open-project)
-                 ("q" "Open Quick Add" org-todoist-xdg-open-quickadd)
-                 ("/" "Open Search Query" org-todoist-xdg-open-search-query)
-                 ("x" "Last Quick Task" org-todoist-open-last-quick-task-in-app)]
+                 ("I" "Ignore Subtree" org-todoist-ignore-subtree)
+                 ("A" "Add Subproject" org-todoist-add-subproject)]
    [:description (lambda () (propertize "Diagnostics" 'face 'org-todoist-heading-face))
                  ("D" "Show Diagnostics" org-todoist-diagnose)
-                 ("P" "Test Push Commands" org-todoist--push-test)
+                 ("C" "Test Push Commands" org-todoist--push-test)
                  ("R" "Report Bug" org-todoist-report-bug)
                  ("M" "Migrate to V1 API" org-todoist-migrate-to-v1)]])
 
