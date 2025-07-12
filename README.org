@@ -1,7 +1,7 @@
-#+title: Readme
+#+title: Org Todoist
 #+OPTIONS: f:t
 
-* Org Todoist: What is it?
+* What is it?
 An Emacs package for bidirectional incremental sync of [[https://orgmode.org/][Org Mode]] elements with [[https://todoist.com/][Todoist]] using org /exactly how you normally would in Emacs Org Mode/.
 
 [[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/demo.png]]
@@ -24,6 +24,7 @@ An Emacs package for bidirectional incremental sync of [[https://orgmode.org/][O
 - CRUD[fn:1] new projects
 - Refile tasks and sections to other sections and projects
 - /Collaboration with other users/ via assigning tasks and notifications.
+- Open tasks, projects, sections, and views in the browser or Todoist app
 
 ** Mapping org headlines to Todoist objects
 
@@ -108,6 +109,10 @@ The following commands (and more!) are automatically available after installatio
 
 *Local changes will overwrite remote changes!*
 
+Tasks can be created via org, org capture, or Todoist natural language processing.
+
+[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/quick-task-open.gif]]
+
 ** Creating projects, subprojects, sections, tasks, and subtasks
 Simply create org headlines! The corresponding Todoist types (projects, subprojects, sections, tasks, and subtasks) will be inferred from the org structure. Sections will be preferred over subprojects unless the ~TODOIST_TYPE~ property is set to ~PROJECT~. A new subproject can be created quickly using the interactive function ~org-todoist-add-subproject~. If a TODO item does not fall under a project, it will be assigned to the default section of the Inbox project.
 
@@ -140,6 +145,8 @@ Comments are done via ~org-add-note~ and currently ([2025-01-12 Sun]) do not sup
 (setq org-todoist-comment-tag-user-pretty nil)
 #+end_src
 
+[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/comments.png]]
+
 ** Assigning and viewing assigned tasks
 #+begin_src emacs-lisp
 (org-todoist-assign-task) ;; Prompts for user selection and changes the responsible uid property to the user's id
@@ -151,6 +158,8 @@ Comments are done via ~org-add-note~ and currently ([2025-01-12 Sun]) do not sup
 (org-todoist-view-user-tasks USER) ;; View tasks assigned to a specific user
 #+end_src
 
+[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/my-agenda.png]]
+
 [[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/assign.png]]
 
 ** Navigation and project views
@@ -161,6 +170,8 @@ Comments are done via ~org-add-note~ and currently ([2025-01-12 Sun]) do not sup
 #+end_src
 
 ** Opening in Todoist App
+[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/control-todoist.gif]]
+
 #+begin_src emacs-lisp
 (org-todoist-xdg-open) ;; Open current task in Todoist app
 (org-todoist-xdg-open-project) ;; Open selected project in Todoist app
@@ -177,7 +188,7 @@ If you'd like to keep other notes or TODOs alongside your projects and not have 
 ** Org capture to a Todoist project section
 /Captures will automatically sync by default/ via the ~org-capture-finalize-hook~. If you would like to change this behavior, run ~(remove-hook 'org-capture-after-finalize-hook #'org-todoist--sync-after-capture)~.
 
-Captures can be run from the transient interface with default capture templates via ~(org-todoist-capture-task)~. Alternatively, one can add their own templates like in the sample below:
+Captures can be run from the transient interface with default capture templates for Todoist via ~(org-todoist-capture-task)~. These capture templates are customized via ~org-todoist-capture-templates~ Alternatively, one can add their own org templates like in the sample below:
 
 Sample capture templates:
 #+begin_src emacs-lisp
@@ -298,6 +309,8 @@ The Todoist API has a limit of 100 commands per request. When syncing large chan
 - ~org-todoist-deleted-keyword~ - Deleted tasks (default: "CANCELED")
 
 ** Troubleshooting
+
+[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/diagnostics.png]]
 
 For troubleshooting errors, you can use the following variables and methods:
 - ~org-todoist-diagnose~ - Shows a pretty org-mode view of the information below
