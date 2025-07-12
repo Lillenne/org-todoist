@@ -228,6 +228,93 @@ viewing property drawers."
   :type 'boolean
   :group 'org-todoist)
 
+(defcustom org-todoist-capture-templates
+  '(("t" "Task" entry (function org-todoist-find-project-and-section)
+     "* TODO %^{What is the task} %^G %^{EFFORT}p %(org-todoist-assign-task) %(progn (org-schedule nil) nil) %(progn (org-deadline nil) nil)\n%?")
+    ("n" "Project Notes" entry (function org-todoist-project-notes) "* %?"))
+  "Custom `org-capture-template's for Org-Todoist's `org-todoist-capture-task'.
+This variable declaration is copied directly from `org-capture-templates'
+in org-capture.el, which is licensed under the GPL V3 license."
+  :group 'org-todoist
+  :set (lambda (s v) (set-default-toplevel-value s (org-capture-upgrade-templates v)))
+  :type
+  (let ((file-variants '(choice :tag "Filename       "
+                         (file :tag "Literal")
+                         (function :tag "Function")
+                         (variable :tag "Variable"))))
+    `(repeat
+      (choice :value ("" "" entry (file "~/org/todoist.org") "")
+              (list :tag "Multikey description"
+                    (string :tag "Keys       ")
+                    (string :tag "Description"))
+              (list :tag "Template entry"
+                    (string :tag "Keys           ")
+                    (string :tag "Description    ")
+                    (choice :tag "Capture Type   " :value entry
+                            (const :tag "Org entry" entry)
+                            (const :tag "Plain list item" item)
+                            (const :tag "Checkbox item" checkitem)
+                            (const :tag "Plain text" plain)
+                            (const :tag "Table line" table-line))
+                    (choice :tag "Target location"
+                            (list :tag "File"
+                                  (const :format "" file)
+                                  ,file-variants)
+                            (list :tag "ID"
+                                  (const :format "" id)
+                                  (string :tag "  ID"))
+                            (list :tag "File & Headline"
+                                  (const :format "" file+headline)
+                                  ,file-variants
+                                  (string :tag "  Headline"))
+                            (list :tag "File & Outline path"
+                                  (const :format "" file+olp)
+                                  ,file-variants
+                                  (repeat :tag "Outline path" :inline t
+                                          (string :tag "Headline")))
+                            (list :tag "File & Regexp"
+                                  (const :format "" file+regexp)
+                                  ,file-variants
+                                  (regexp :tag "  Regexp"))
+                            (list :tag "File [ & Outline path ] & Date tree"
+                                  (const :format "" file+olp+datetree)
+                                  ,file-variants
+                                  (option (repeat :tag "Outline path" :inline t
+                                                  (string :tag "Headline"))))
+                            (list :tag "File & function"
+                                  (const :format "" file+function)
+                                  ,file-variants
+                                  (function :tag "  Function"))
+                            (list :tag "Current clocking task"
+                                  (const :format "" clock))
+                            (list :tag "Function"
+                                  (const :format "" function)
+                                  (function :tag "  Function")))
+                    (choice :tag "Template       "
+                            (string)
+                            (list :tag "File"
+                                  (const :format "" file)
+                                  (file :tag "Template file"))
+                            (list :tag "Function"
+                                  (const :format "" function)
+                                  (function :tag "Template function")))
+                    (plist :inline t
+                           ;; Give the most common options as checkboxes
+                           :options (((const :format "%v " :prepend) (const t))
+                                     ((const :format "%v " :immediate-finish) (const t))
+                                     ((const :format "%v " :jump-to-captured) (const t))
+                                     ((const :format "%v " :empty-lines) (const 1))
+                                     ((const :format "%v " :empty-lines-before) (const 1))
+                                     ((const :format "%v " :empty-lines-after) (const 1))
+                                     ((const :format "%v " :clock-in) (const t))
+                                     ((const :format "%v " :clock-keep) (const t))
+                                     ((const :format "%v " :clock-resume) (const t))
+                                     ((const :format "%v " :time-prompt) (const t))
+                                     ((const :format "%v " :tree-type) (const week))
+                                     ((const :format "%v " :unnarrowed) (const t))
+                                     ((const :format "%v " :table-line-pos) (string))
+                                     ((const :format "%v " :kill-buffer) (const t)))))))))
+
 (define-minor-mode org-todoist-mode
   "Minor mode for Org-Todoist."
   :lighter " Todoist"
@@ -2541,10 +2628,7 @@ After user confirms, performs an incremental sync first, then full reset.
   (interactive)
   (unless org-todoist-api-token
     (user-error "Please set org-todoist-api-token"))
-  (let ((org-capture-templates
-         '(("t" "Task" entry (function org-todoist-find-project-and-section)
-            "* TODO %^{What is the task} %^G %^{EFFORT}p %(org-todoist-assign-task) %(progn (org-schedule nil) nil) %(progn (org-deadline nil) nil)\n%?")
-           ("n" "Project Notes" entry (function org-todoist-project-notes) "* %?"))))
+  (let ((org-capture-templates org-todoist-capture-templates))
     (org-capture nil)))
 
 ;;;###autoload
