@@ -143,13 +143,15 @@ Currently this is ignored in favor of `current-time'."
   :type 'boolean
   :group 'org-todoist)
 
-(defcustom org-todoist-assignees-overlay t
+(defcustom org-todoist-assignees-overlay nil
   "Whether to automatically show assignee overlays for all tasks.
-When enabled, assignee names will be displayed next to tasks automatically."
+When enabled, assignee names will be displayed next to tasks automatically.
+This works well for manual text insertion but does not play nicely with
+moving org subtrees with builtin org functions."
   :type 'boolean
   :group 'org-todoist)
 
-(defcustom org-todoist-infer-project-for-capture t
+(defcustom org-todoist-infer-project-for-capture nil
   "Whether to infer the active project in `org-capture'."
   :type 'boolean
   :group 'org-todoist)
@@ -327,7 +329,7 @@ in org-capture.el, which is licensed under the GPL V3 license."
         ;; NOTE this requires it to be done from emacs and not eg. orgzly
         (add-hook 'org-after-todo-state-change-hook #'org-todoist--item-close-hook nil t))
     (org-todoist-remove-uid-overlays)
-    (remove-overlays (point-min) (point-max) 'org-todoist-assignee-overlay t)))
+    (org-todoist-remove-assignee-overlays)))
 
 (defcustom org-todoist-storage-dir (concat (file-name-as-directory (xdg-cache-home))
                                            "org-todoist")
@@ -794,6 +796,11 @@ the Todoist project, section, and optionally parent task."
               (overlay-put ov 'display name)
               (overlay-put ov 'org-todoist-uid t))))))))
 
+(defun org-todoist-remove-assignee-overlays ()
+  "Remove overlays displaying assignee names."
+  (interactive)
+  (remove-overlays (point-min) (point-max) 'org-todoist-assignee-overlay t))
+
 (defun org-todoist-remove-uid-overlays ()
   "Remove overlays displaying user names."
   (interactive)
@@ -1026,6 +1033,9 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
       (org-fold-show-siblings)
       (org-fold-show-children))
     (org-fold-hide-drawer-all)   ; always hide drawers
+    (org-todoist-remove-uid-overlays)
+    (org-todoist-remove-assignee-overlays)
+    (org-todoist-mode 1)
     (write-file (org-todoist-file))))
 
 (defun org-todoist--first-parent-of-type (NODE TYPES)
@@ -2610,7 +2620,7 @@ After user confirms, performs an incremental sync first, then full reset.
   (setq org-todoist-assignees-overlay (not org-todoist-assignees-overlay))
   (if org-todoist-assignees-overlay
       (org-todoist-show-all-assignees)
-    (remove-overlays (point-min) (point-max) 'org-todoist-assignee-overlay t)))
+    (org-todoist-remove-assignee-overlays)))
 
 ;;;###autoload
 (defun org-todoist-show-all-assignees ()
