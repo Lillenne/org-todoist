@@ -236,7 +236,9 @@ viewing property drawers."
         (when org-todoist-show-assignee-overlay-in-property-drawers
           (org-todoist-add-uid-overlays))
         (when org-todoist-assignees-overlay
-          (org-todoist-show-all-assignees)))
+          (org-todoist-show-all-assignees))
+        ;; NOTE this requires it to be done from emacs and not eg. orgzly
+        (add-hook 'org-after-todo-state-change-hook #'org-todoist--item-close-hook nil t))
     (org-todoist-remove-uid-overlays)
     (remove-overlays (point-min) (point-max) 'org-todoist-assignee-overlay t)))
 
@@ -448,13 +450,6 @@ Automatically widens the buffer to ensure all content is accessible."
                     (org-todoist--set-last-response response))
            (message "item_close hook failed. See org-todoist--sync-err for details.")))))))
 
-;; NOTE this requires it to be done from emacs and not eg. orgzly
-(defun org-todoist--complete-recurring-task ()
-  "Add a hook to complete recurring tasks."
-  (add-hook 'org-after-todo-state-change-hook #'org-todoist--item-close-hook nil t))
-
-(add-hook 'org-todoist-mode-hook #'org-todoist--complete-recurring-task)
-
 (defun org-todoist--activate-mode ()
   "Activate `org-todoist-mode' for the current buffer."
   (when (equal (buffer-file-name) (org-todoist-file))
@@ -464,8 +459,11 @@ Automatically widens the buffer to ensure all content is accessible."
 (if (boundp 'auto-minor-mode-alist)
     ;; hook into `auto-minor-mode-alist' if it exists. See https://github.com/joewreschnig/auto-minor-mode
     (add-to-list 'auto-minor-mode-alist `(,(regexp-quote (org-todoist-file)) . org-todoist-mode))
-    ;; otherwise use `find-file-hook' to activate the mode
-  (add-hook 'find-file-hook #'org-todoist--activate-mode))
+  ;; otherwise use `org-mode-hook' to activate the mode
+  (add-hook 'org-mode-hook #'org-todoist--activate-mode))
+
+;; automatically sync after capture
+(add-hook 'org-capture-after-finalize-hook #'org-todoist--sync-after-capture)
 
 (add-to-list 'org-fold-show-context-detail '(todoist . lineage))
 
@@ -590,8 +588,6 @@ the Todoist project, section, and optionally parent task."
       (set-buffer (org-capture-target-buffer (org-todoist-file)))
       (goto-char (point-min))
       (org-todoist--capture-ensure-heading headlines))))
-
-(add-hook 'org-capture-after-finalize-hook #'org-todoist--sync-after-capture)
 
                                         ;Implementation;;;;;;;;;;;;;;;;;;;;;;;;
 (defun org-todoist--sync-endpoint ()
