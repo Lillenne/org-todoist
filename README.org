@@ -4,7 +4,7 @@
 * What is it?
 An Emacs package for bidirectional incremental sync of [[https://orgmode.org/][Org Mode]] elements with [[https://todoist.com/][Todoist]] using org /exactly how you normally would in Emacs Org Mode/.
 
-[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/demo.png]]
+[[./readme-images/demo.png]]
 
 ** Key features
 - CRUD[fn:1] tasks
@@ -111,7 +111,7 @@ The following commands (and more!) are automatically available after installatio
 
 Tasks can be created via org, org capture, or Todoist natural language processing.
 
-[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/quick-task-open.gif]]
+[[./readme-images/quick-task-open.gif]]
 
 ** Creating projects, subprojects, sections, tasks, and subtasks
 Simply create org headlines! The corresponding Todoist types (projects, subprojects, sections, tasks, and subtasks) will be inferred from the org structure. Sections will be preferred over subprojects unless the ~TODOIST_TYPE~ property is set to ~PROJECT~. A new subproject can be created quickly using the interactive function ~org-todoist-add-subproject~. If a TODO item does not fall under a project, it will be assigned to the default section of the Inbox project.
@@ -145,7 +145,7 @@ Comments are done via ~org-add-note~ and currently ([2025-01-12 Sun]) do not sup
 (setq org-todoist-comment-tag-user-pretty nil)
 #+end_src
 
-[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/comments.png]]
+[[./readme-images/comments.png]]
 
 ** Assigning and viewing assigned tasks
 #+begin_src emacs-lisp
@@ -158,9 +158,9 @@ Comments are done via ~org-add-note~ and currently ([2025-01-12 Sun]) do not sup
 (org-todoist-view-user-tasks USER) ;; View tasks assigned to a specific user
 #+end_src
 
-[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/my-agenda.png]]
+[[./readme-images/my-agenda.png]]
 
-[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/assign.png]]
+[[./readme-images/assign.png]]
 
 ** Navigation and project views
 #+begin_src emacs-lisp
@@ -170,7 +170,8 @@ Comments are done via ~org-add-note~ and currently ([2025-01-12 Sun]) do not sup
 #+end_src
 
 ** Opening in Todoist App
-[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/control-todoist.gif]]
+
+[[./readme-images/control-todoist.gif]]
 
 #+begin_src emacs-lisp
 (org-todoist-xdg-open) ;; Open current task in Todoist app
@@ -310,7 +311,7 @@ The Todoist API has a limit of 100 commands per request. When syncing large chan
 
 ** Troubleshooting
 
-[[https://media.githubusercontent.com/media/Lillenne/org-todoist/refs/heads/main/readme-images/diagnostics.png]]
+[[./readme-images/diagnostics.png]]
 
 For troubleshooting errors, you can use the following variables and methods:
 - ~org-todoist-diagnose~ - Shows a pretty org-mode view of the information below
