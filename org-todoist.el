@@ -208,6 +208,24 @@ The official limit is 100, but this can be set lower to avoid issues.
   :type 'integer
   :group 'org-todoist)
 
+(defconst org-todoist--time-pattern
+  "\\(?:at\\s-+\\([0-9]+\\)\\(?::\\([0-9]+\\)\\)?\\s-*\\(?:am\\|pm\\)?\\|\\([0-9]+\\):\\([0-9]+\\)\\s-*\\(?:am\\|pm\\)?\\|\\([0-9]+\\)\\s-*\\(?:am\\|pm\\)\\)")
+
+(defconst org-todoist--date-pattern
+  "\\([0-9]+\\)/\\([0-9]+\\)")
+
+(defconst org-todoist--full-date-time-pattern
+  (concat org-todoist--date-pattern "\\(?:\\s-+at\\s-+" org-todoist--time-pattern "\\)?"))
+
+(defconst org-todoist--weekday-pattern
+  "\\b\\(mon\\(?:day\\)?\\|tue\\(?:s\\(?:day\\)?\\)?\\|wed\\(?:nesday\\)?\\|thu\\(?:r\\(?:s\\(?:day\\)?\\)?\\)?\\|fri\\(?:day\\)?\\|sat\\(?:urday\\)?\\|sun\\(?:day\\)?\\)\\b")
+
+(defconst org-todoist--interval-pattern
+  "\\(?:ev\\(?:ery\\)?\\)!?\\s-+\\(?:\\(other\\)\\|\\([0-9]+\\)\\(?:nd\\|rd\\|th\\)?\\).*")
+
+(defconst org-todoist--unit-pattern
+  "\\b\\(day\\|week\\|month\\|year\\)s?\\b")
+
 (defcustom org-todoist-duration-as-timestamp nil
   "If non-nil, use timestamp for duration instead of effort."
   :type 'boolean
@@ -520,7 +538,8 @@ Automatically widens the buffer to ensure all content is accessible."
   "Send an item_close request for TODO at point."
   (defvar org-state) ; silence byte compilation warning for org-state, which will already be defined here
   (when (and (equal org-state org-todoist-done-keyword)
-             (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point)) t))
+             (or (org-entry-get nil "is_recurring")
+                 (org-todoist--task-is-recurring (org-element-resolve-deferred (org-element-at-point)) t)))
     (when-let* ((id (org-entry-get nil org-todoist--id-property))
                 (args `(("id" . ,id)))
                 (request-data `(("sync_token" . ,(org-todoist--get-sync-token))
@@ -529,7 +548,7 @@ Automatically widens the buffer to ensure all content is accessible."
                                                 ("args" . ,args)))))))
       (setq org-todoist--sync-err nil)
       (unless (org-todoist--is-current-api)
-        (user-error "Org todoist has updated API versions! Run 'org-todoist-migrate-to-v1' and set 'org-todoist-use-v1-api' to 't' to continue using org-todoist"))
+        (user-error "Org todoist has updated API versions! Run 'org-todoist-migrate-to-v1'"))
       (org-todoist--api-call
        request-data
        (lambda (response)
@@ -1085,49 +1104,147 @@ Uses `curl' if available, otherwise falls back to `url-retrieve'."
   "Create the Todoist date JSON object for `KEYWORD' in `NODE'.
 
 `KEYWORD' is :scheduled, :deadline, or :closed"
-  (let ((dl (org-todoist--get-planning-date NODE KEYWORD)))
-    (when dl
-      (let ((res `(("date" . ,dl)
-                   ("lang" . ,org-todoist-lang)
-                   ;; ("string" . ,dl)
-                   ;; ("timezone" . ,(if org-todoist-tz org-todoist-tz (cadr (current-time-zone))))
-                   ))
-            (is-recurring (org-todoist--task-is-recurring NODE KEYWORD)))
-        ;; (when (and (eq KEYWORD :scheduled) is-recurring)
-        (when is-recurring
-          (push `("is_recurring" . ,t) res)
-          (push `("string" . ,(org-todoist--repeater-to-string (org-element-property KEYWORD NODE))) res))
-        ;; (when org-todoist-tz (push `("timezone" . ,org-todoist-tz) res))
-        res))))
+  (when-let* ((dl (org-todoist--get-planning-date NODE KEYWORD))
+              (res `(("date" . ,dl)
+                     ("lang" . ,org-todoist-lang)
+                     ;; ("string" . ,dl)
+                     ;; ("timezone" . ,(if org-todoist-tz org-todoist-tz (cadr (current-time-zone))))
+                     ("timezone" . nil)
+                     )))
+    ;; (when (and (eq KEYWORD :scheduled) is-recurring)
+    (when (org-todoist--task-is-recurring NODE KEYWORD)
+      (push `("is_recurring" . ,t) res)
+      (push `("string" . ,(org-todoist--repeater-to-string
+                           (org-element-property KEYWORD NODE)))
+            res))
+    res))
+;; (when org-todoist-tz (push `("timezone" . ,org-todoist-tz) res))
 
-(defun org-todoist--repeater-to-string (TIMESTAMP)
-  "Convert a repeating `TIMESTAMP' to it's Todoist string representation."
-  (let ((value (org-element-property :repeater-value TIMESTAMP))
-        (unit (org-element-property :repeater-unit TIMESTAMP)))
-    (when (and value unit)
-      (concat "every " (number-to-string value) " " (symbol-name unit)))))
+(defun org-todoist--parse-time-component (string)
+  "Extract hour and minute from time string like '2pm' or 'at 5:30pm'."
+  (when (string-match org-todoist--time-pattern string)
+    (let* ((at-hour (match-string 1 string))  ; hours after "at"
+           (at-min (match-string 2 string))   ; minutes after "at"
+           (full-hour (match-string 3 string)) ; hours in full time
+           (full-min (match-string 4 string))  ; minutes in full time
+           (ampm-hour (match-string 5 string)) ; hours with am/pm
+           (hour (string-to-number (or at-hour full-hour ampm-hour)))
+           (minute (if (or at-min full-min)
+                       (string-to-number (or at-min full-min))
+                     0))
+           (meridian (and (string-match "\\(am\\|pm\\)" string)
+                          (match-string 1 string))))
+      ;; Convert to 24h format if needed
+      (when (and meridian (string= meridian "pm") (< hour 12))
+        (setq hour (+ hour 12)))
+      (list hour minute))))
 
-(defun org-todoist--add-repeater (TIMESTAMP STRING)
-  "Add a repeater value to `TIMESTAMP' from Todoist `STRING'."
-  ;; TODO more repeater cases https://todoist.com/help/articles/introduction-to-recurring-due-dates-YUYVJJAV
-  (let ((match (s-match "ev[[:alpha:]]+!?\\s-+\\([[:digit:]]*\\)\\s-*\\([[:alpha:]]+\\)\\(.*\\)" STRING)))
-    (when (and match (s-blank? (nth 3 match)) (member (nth 2 match) '("week" "weeks" "month" "months" "day" "days" "hour" "hours" "year" "years"
-                                                                      "mon" "monday"
-                                                                      "tue" "tues" "tuesday"
-                                                                      "wed" "wednesday"
-                                                                      "thu" "thur" "thurs" "thursday"
-                                                                      "fri" "friday"
-                                                                      "sat" "saturday"
-                                                                      "sun" "sunday")))
-      (org-element-put-property TIMESTAMP :repeater-type (if (s-contains? "!" STRING) 'restart 'cumulate))
-      (org-element-put-property TIMESTAMP :repeater-unit (org-todoist--get-repeater-symbol (nth 2 match)))
-      (org-element-put-property TIMESTAMP :repeater-value (if (s-blank? (cadr match)) 1 (string-to-number (cadr match)))))))
+(defun org-todoist--parse-date-component (string)
+  "Extract month and day from date string like '07/12'."
+  (when (string-match org-todoist--date-pattern string)
+    (list (string-to-number (match-string 1 string))
+          (string-to-number (match-string 2 string)))))
+
+(defun org-todoist--parse-weekday (string)
+  "Extract weekday from string."
+  (when (string-match org-todoist--weekday-pattern string)
+    (let ((day (match-string 1 string)))
+      (upcase (substring day 0 3)))))
+
+(defun org-todoist--parse-interval (string)
+  "Extract interval value from string like 'every other' or 'every 3'."
+  (when (string-match org-todoist--interval-pattern string)
+    (cond
+     ((match-string 1 string) 2) ; "other" matched 
+     ((match-string 2 string) (string-to-number (match-string 2 string))) ; number matched
+     (t 1)))) ; just "every" with no interval
+
+(defun org-todoist--parse-unit (string)
+  "Extract time unit from string."
+  (when (string-match org-todoist--unit-pattern string)
+    (let ((unit (match-string 1 string)))
+      (intern unit))))
+
+(defun org-todoist--repeater-to-string (timestamp)
+  "Convert a repeating TIMESTAMP to its Todoist string representation."
+  (when (org-element-property :repeater-type timestamp)
+    (let ((value (org-element-property :repeater-value timestamp))
+          (unit (org-element-property :repeater-unit timestamp)))
+      (when value
+        (concat "every " 
+                (if (= value 2) "other "
+                  (when (> value 1)
+                    (concat (number-to-string value) " ")))
+                (symbol-name unit))))))
+
+(defun org-todoist--unsupported-recurring-date-type (string)
+  "Check if STRING contains an unsupported recurring date pattern.
+Return t if the pattern is unsupported by org-mode (e.g. variable intervals)."
+  (let ((normalized (s-downcase string)))
+    (or (string-match-p "\\bworkday\\b" normalized)
+        (string-match-p "\\bweekday\\b" normalized)
+        (string-match-p ",[^,]*," normalized)))) ; Multiple days separated by commas
+
+(defun org-todoist--add-repeater (timestamp string)
+  "Add a repeater value to TIMESTAMP from Todoist STRING."
+  (unless (org-todoist--unsupported-recurring-date-type string)
+    (let* ((normalized-string (s-downcase string))
+           (repeater-type (if (string-match-p "!" normalized-string) 
+                              'restart 'cumulate))
+           (interval (org-todoist--parse-interval normalized-string))
+           (unit (org-todoist--parse-unit normalized-string))
+           (weekday (org-todoist--parse-weekday normalized-string))
+           (time (org-todoist--parse-time-component normalized-string))
+           (date (org-todoist--parse-date-component normalized-string)))
+      ;; Set the repeater properties
+      (org-element-put-property timestamp :repeater-type repeater-type)
+      (org-element-put-property timestamp :repeater-unit
+                                (org-todoist--get-repeater-symbol normalized-string))
+
+      (org-element-put-property timestamp :repeater-value (or interval 1))
+
+      (when unit
+        (org-element-put-property timestamp :repeater-unit unit))
+
+      ;; For single weekday patterns, set weekly repeater
+      (when weekday
+        (org-element-put-property timestamp :repeater-unit 'week))
+
+      ;; For date patterns, add repeater and specific date
+      (when date
+        (org-element-put-property timestamp :month-start (car date))
+        (org-element-put-property timestamp :day-start (cadr date)))
+
+      ;; Set time if specified 
+      (when time
+        (org-element-put-property timestamp :hour-start (car time))
+        (org-element-put-property timestamp :minute-start (cadr time)))
+
+      ;; Handle special cases
+      (cond
+       ((string-match-p "\\bmorning\\b" normalized-string)
+        (org-element-put-property timestamp :repeater-unit 'day)
+        (org-element-put-property timestamp :hour-start 9)
+        (org-element-put-property timestamp :minute-start 0))
+       ((string-match-p "\\bafternoon\\b" normalized-string)
+        (org-element-put-property timestamp :repeater-unit 'day)
+        (org-element-put-property timestamp :hour-start 12)
+        (org-element-put-property timestamp :minute-start 0))
+       ((string-match-p "\\bevening\\b" normalized-string)
+        (org-element-put-property timestamp :repeater-unit 'day)
+        (org-element-put-property timestamp :hour-start 19)
+        (org-element-put-property timestamp :minute-start 0))
+       ((string-match-p "\\bnight\\b" normalized-string)
+        (org-element-put-property timestamp :repeater-unit 'day)
+        (org-element-put-property timestamp :hour-start 22)
+        (org-element-put-property timestamp :minute-start 0))))
+    timestamp))
 
 (defun org-todoist--get-repeater-symbol (TIME-UNIT-STRING)
   "Get the current org repeater-unit symbol from `TIME-UNIT-STRING'."
   (cond
    ((s-contains? "week" TIME-UNIT-STRING t) 'week)
-   ((s-contains? "day" TIME-UNIT-STRING t) 'day)
+   ((s-contains? " day" TIME-UNIT-STRING t) 'day) ;; leading space!
    ((s-contains? "month" TIME-UNIT-STRING t) 'month)
    ((s-contains? "year" TIME-UNIT-STRING t) 'year)
    ((s-contains? "hour" TIME-UNIT-STRING t) 'hour)
@@ -1141,12 +1258,13 @@ of the scheduled time.
 If `KEYWORD' is t, check both scheduled and
 deadline properties.
 Else check scheduled only."
-  (cond ((eq KEYWORD :deadline)
-         (org-element-property :repeater-type (org-element-property :deadline TASK)))
-        ((eq KEYWORD t)
-         (or (org-element-property :repeater-type (org-element-property :deadline TASK))
-             (org-element-property :repeater-type (org-element-property :scheduled TASK))))
-        (t (org-element-property :repeater-type (org-element-property :scheduled TASK)))))
+  (or (org-todoist--get-prop TASK "is_recurring")
+      (cond ((eq KEYWORD :deadline)
+             (org-element-property :repeater-type (org-element-property :deadline TASK)))
+            ((eq KEYWORD t)
+             (or (org-element-property :repeater-type (org-element-property :deadline TASK))
+                 (org-element-property :repeater-type (org-element-property :scheduled TASK))))
+            (t (org-element-property :repeater-type (org-element-property :scheduled TASK))))))
 
 (defun org-todoist--log-drawer (HL)
   "Gets the LOGBOOK drawer for `HL'."
@@ -3157,10 +3275,10 @@ format used by API v1. This should only be run once. It requires
                              (setq org-todoist--api-version 'v1))
 
       ;; 5. Remove 'description node properties
-        (org-element-map ast 'node-property
-            (lambda (node)
-            (when (equal (org-element-property :key node) "description")
-                (org-element-extract node))))
+      (org-element-map ast 'node-property
+        (lambda (node)
+          (when (equal (org-element-property :key node) "description")
+            (org-element-extract node))))
 
       ;; 6. Write updated AST to file
       (org-todoist--update-file ast)

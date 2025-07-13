@@ -186,6 +186,116 @@ More description
 ;;     (org-todoist--put-node-attribute hl "testattr" "MYVAL")
 ;;     (should (string-equal (org-todoist--get-node-attribute hl "testattr") "MYVAL"))))
 
+(ert-deftest org-todoist--test-parse-time-component ()
+  "Test parsing time components from strings"
+  (let ((cases '(("at 2pm" (14 0))
+                 ("5:30pm" (17 30))
+                 ("9am" (9 0))
+                 ("at 15:45" (15 45))
+                 ("3" (3 0)))))
+    (dolist (case cases)
+      (should (equal (org-todoist--parse-time-component (car case))
+                    (cadr case))))))
+
+(ert-deftest org-todoist--test-parse-weekday ()
+  "Test parsing weekdays from strings"
+  (let ((cases '(("monday" "MON")
+                 ("tue" "TUE")
+                 ("wednesday" "WED")
+                 ("thursday" "THU")
+                 ("fri" "FRI")
+                 ("saturday" "SAT")
+                 ("sun" "SUN"))))
+    (dolist (case cases)
+      (should (equal (org-todoist--parse-weekday (car case))
+                    (cadr case))))))
+
+(ert-deftest org-todoist--test-parse-interval ()
+  "Test parsing intervals from strings"
+  (let ((cases '(("every other" 2)
+                 ("every 3rd" 3)
+                 ("every" 1)
+                 ("every 5th" 5))))
+    (dolist (case cases)
+      (should (equal (org-todoist--parse-interval (car case))
+                    (cadr case))))))
+
+(ert-deftest org-todoist--test-parse-unit ()
+  "Test parsing time units from strings"
+  (let ((cases '(("day" day)
+                 ("weeks" week)
+                 ("month" month)
+                 ("years" year))))
+    (dolist (case cases)
+      (should (equal (org-todoist--parse-unit (car case))
+                    (cadr case))))))
+
+(ert-deftest org-todoist--test--add-repeater-basic ()
+  "Test basic recurring patterns"
+  (let ((ts (org-element-create 'timestamp)))
+    ;; Daily patterns with time
+    (org-todoist--add-repeater ts "every day at 2pm")
+    (should (eq (org-element-property :repeater-unit ts) 'day))
+    (should (eq (org-element-property :repeater-value ts) 1))
+    (should (eq (org-element-property :repeater-type ts) 'cumulate))
+    (should (eq (org-element-property :hour-start ts) 14))
+    (should (eq (org-element-property :minute-start ts) 0))
+    
+    ;; Weekly patterns with weekday
+    (org-todoist--add-repeater ts "every friday")
+    (should (eq (org-element-property :repeater-unit ts) 'week))
+    (should (eq (org-element-property :repeater-value ts) 1))
+
+    (org-todoist--add-repeater ts "every other friday")
+    (should (eq (org-element-property :repeater-unit ts) 'week))
+    (should (eq (org-element-property :repeater-value ts) 2))
+    
+    ;; Monthly patterns with restart
+    (org-todoist--add-repeater ts "every! 2 months")
+    (should (eq (org-element-property :repeater-unit ts) 'month))
+    (should (eq (org-element-property :repeater-value ts) 2))
+    (should (eq (org-element-property :repeater-type ts) 'restart))))
+
+(ert-deftest org-todoist--test--add-repeater-times ()
+  "Test patterns with specific times"
+  (let ((ts (org-element-create 'timestamp)))
+    ;; Morning
+    (org-todoist--add-repeater ts "every morning")
+    (should (eq (org-element-property :repeater-unit ts) 'day))
+    (should (eq (org-element-property :hour-start ts) 9))
+    (should (eq (org-element-property :minute-start ts) 0))
+    
+    ;; Afternoon
+    (org-todoist--add-repeater ts "ev afternoon")
+    (should (eq (org-element-property :hour-start ts) 12))
+    
+    ;; Evening
+    (org-todoist--add-repeater ts "every! evening") 
+    (should (eq (org-element-property :hour-start ts) 19))
+    (should (eq (org-element-property :repeater-type ts) 'restart))))
+
+(ert-deftest org-todoist--test--add-repeater-with-dates ()
+  "Test patterns with specific dates"
+  (let ((ts (org-element-create 'timestamp)))
+    ;; Date with time
+    (org-todoist--add-repeater ts "every 2 week on 07/12 at 16:30")
+    (should (eq (org-element-property :repeater-unit ts) 'week))
+    (should (eq (org-element-property :repeater-value ts) 2))
+    (should (eq (org-element-property :month-start ts) 7))
+    (should (eq (org-element-property :day-start ts) 12))
+    (should (eq (org-element-property :hour-start ts) 16))
+    (should (eq (org-element-property :minute-start ts) 30))
+    
+    ;; Date without time
+    (setq ts (org-element-create 'timestamp))
+    (org-todoist--add-repeater ts "every 2 week on 07/12")
+    (should (eq (org-element-property :repeater-unit ts) 'week))
+    (should (eq (org-element-property :repeater-value ts) 2))
+    (should (eq (org-element-property :month-start ts) 7))
+    (should (eq (org-element-property :day-start ts) 12))
+    (should (eq (org-element-property :hour-start ts) nil))
+    (should (eq (org-element-property :minute-start ts) nil))))
+
 (ert-deftest org-todoist--test--repeater-regex ()
   (let ((ts (org-element-create 'timestamp))
         (str "every! mon, tues, wed, thurs"))
