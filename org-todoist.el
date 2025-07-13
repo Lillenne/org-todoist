@@ -1520,6 +1520,12 @@ instead of id."
                        (progn
                          ;; item_add. No ID -> new item
                          (org-todoist--insert-identifier hl org-todoist--task-type)
+                         ;; HACK the current 07/25 Todoist API does not correctly add dates in item_add requests
+                         (let ((req `(("type" . "item_update")
+                                      ("uuid" . ,(org-id-uuid))
+                                      ("args" . (("id" . ,id)
+                                                 ("due" . ,(org-todoist--todoist-date-object-for-kw hl :scheduled)))))))
+                           (push req commands))
                          (push `(("uuid" . ,(org-id-uuid))
                                  ("temp_id" . ,id)
                                  ("type" . "item_add")
