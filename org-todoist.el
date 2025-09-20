@@ -1285,7 +1285,7 @@ Else check scheduled only."
         (if-let ((children (org-element-contents drawer)))
             (org-element-insert-before note (car children)) ; TODO this adds as first note in org, per standard org (todoist is the inverse)
           (org-element-adopt drawer note))
-      (setq drawer (org-element-create 'drawer '(:drawer-name "LOGBOOK") note))
+      (setq drawer (org-element-create 'drawer '(:drawer-name "LOGBOOK" :pre-blank 0) note))
       (org-todoist--adopt-drawer HL drawer)))
   HL)
 
