@@ -78,6 +78,11 @@ The following commands (and more!) are automatically available after installatio
 (org-todoist-ediff-snapshot) ;; Compare current file with last synced state
 (org-todoist-toggle-remote-deletion) ;; Toggle deletion of remote items
 
+;; Git backup (requires git in PATH)
+(org-todoist-git-log) ;; View git commit history for sync buffer
+(org-todoist-git-show-diff) ;; Show diff for a specific commit
+(org-todoist-git-restore) ;; Restore sync buffer from a previous commit
+
 ;; Task management
 (org-todoist-assign-task)
 (org-todoist-unassign-task)
@@ -108,6 +113,31 @@ The following commands (and more!) are automatically available after installatio
 #+end_src
 
 *Local changes will overwrite remote changes!*
+
+*** Git-based Backup System
+Org-todoist automatically tracks sync buffer history using git (when enabled), providing complete protection against data loss. Each sync creates automatic commits before and after the operation, allowing you to:
+
+- View the complete history of all sync operations
+- Review changes made during any sync
+- Restore the sync buffer from any previous point in time
+
+#+begin_src emacs-lisp
+;; Git backup is enabled by default. To disable:
+(setq org-todoist-use-git-backup nil)
+
+;; View git commit history:
+(org-todoist-git-log)                ;; Show recent commits
+
+;; Show diff for a specific commit:
+(org-todoist-git-show-diff)          ;; Select and view commit changes
+
+;; Restore from a previous commit:
+(org-todoist-git-restore)            ;; Restore sync buffer from history
+#+end_src
+
+Git must be available in your PATH for this feature to work. The git repository is automatically initialized in ~org-todoist-storage-dir~ on the first sync when git backup is enabled.
+
+*Note:* Git backup tracks the sync buffer file (used for diffing changes) and sync token. It does not track debug files like last-request.json and last-response.json.
 
 Tasks can be created via org, org capture, or Todoist natural language processing.
 
@@ -246,7 +276,7 @@ Sample capture templates:
 - [ ] Filters (use org!)
 - [ ] Locations / location notifications
 - [ ] Workspaces (collaborators are supported. I currently don't see a use for this or just don't know what I'm missing)
-- [ ] Backups
+- [X] Backups (git-based backup system tracks sync buffer history)
 - [ ] Markdown support
 - [ ] Activity log
 - [ ] Ramble
@@ -303,6 +333,15 @@ If you are running an unsupported API version, the transient interface will aler
 - ~org-todoist-command-batch-size~ - Maximum number of commands to send in a single sync request (default: 75)
 
 The Todoist API has a limit of 100 commands per request. When syncing large changes, org-todoist automatically batches commands into smaller chunks to avoid hitting this limit. The batch size can be configured via ~org-todoist-command-batch-size~ (defaults to 75 due to API 503 errors at 100 during development).
+
+*** Git Backup Configuration
+- ~org-todoist-use-git-backup~ - Enable git-based backup of sync buffer history (default: t)
+  - Requires git to be available in PATH
+  - Automatically creates commits before and after each sync
+  - Provides complete history and ability to restore from any point
+- ~org-todoist-git-commit-message-format~ - Format string for git commit messages (default: "Auto-commit: %s at %s")
+  - First %s is replaced with sync operation (e.g., 'pre-sync', 'post-sync')
+  - Second %s is replaced with timestamp
 
 *** Status Keywords
 - ~org-todoist-todo-keyword~ - Active tasks (default: "TODO")
