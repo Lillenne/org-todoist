@@ -3284,7 +3284,52 @@ When region is active, assign all tasks in the region to the selected user."
                   (user-error "Can only assign users to task headlines")
                 (org-set-property "responsible_uid" uid)))))))))
 
+
 ;;;###autoload
+(defun org-todoist-add-absolute-reminder ()
+  "Add an absolute time reminder to the task at point.
+Prompts for date and time using org date picker."
+  (interactive)
+  (unless (string= (buffer-file-name) (org-todoist-file))
+    (user-error "This command only works in the org-todoist buffer"))
+  (let ((type (org-entry-get nil org-todoist--type)))
+    (unless (or (null type) (string= type org-todoist--task-type))
+      (user-error "Can only add reminders to task headlines")))
+  
+  (let* ((date-time (org-read-date t nil nil "Reminder date/time: "))
+         (ts (org-timestamp-from-time (org-read-date nil t date-time nil) t))
+         (reminder-str (concat "absolute|" (org-todoist--date-to-todoist ts))))
+    (org-set-property "reminders" reminder-str)
+    (message "Added absolute reminder for %s" date-time)))
+
+;;;###autoload
+(defun org-todoist-add-relative-reminder ()
+  "Add a relative time reminder to the task at point.
+Prompts for minutes before due date."
+  (interactive)
+  (unless (string= (buffer-file-name) (org-todoist-file))
+    (user-error "This command only works in the org-todoist buffer"))
+  (let ((type (org-entry-get nil org-todoist--type)))
+    (unless (or (null type) (string= type org-todoist--task-type))
+      (user-error "Can only add reminders to task headlines")))
+  
+  (let* ((minutes (read-number "Minutes before due date: " 30))
+         (reminder-str (format "relative|%d" minutes)))
+    (org-set-property "reminders" reminder-str)
+    (message "Added reminder for %d minutes before due date" minutes)))
+
+;;;###autoload
+(defun org-todoist-remove-reminder ()
+  "Remove the reminder from the task at point."
+  (interactive)
+  (unless (string= (buffer-file-name) (org-todoist-file))
+    (user-error "This command only works in the org-todoist buffer"))
+  (if (org-entry-get nil "reminders")
+      (progn
+        (org-delete-property "reminders")
+        (message "Reminder removed"))
+    (message "No reminder to remove")))
+
 (defun org-todoist-migrate-to-v1 ()
   "Migrate data from Todoist API v9 to v1.
 This function updates all Todoist IDs in function `org-todoist-file' to the new
@@ -3642,7 +3687,10 @@ This affects how Todoist links are opened."
                  ("c" "Org Capture" org-todoist-capture-task)
                  ("g" "Assign" org-todoist-assign-task)
                  ("n" "Unassign" org-todoist-unassign-task)
-                 ("@" "Tag User" org-todoist-tag-user)]
+                 ("@" "Tag User" org-todoist-tag-user)
+                  ("R" "Add Absolute Reminder" org-todoist-add-absolute-reminder)
+                  ("r" "Add Relative Reminder" org-todoist-add-relative-reminder)
+                  ("X" "Remove Reminder" org-todoist-remove-reminder)]
    [:description (lambda () (propertize "Sync Operations" 'face 'org-todoist-heading-face))
                  ("s" "Sync" org-todoist-sync)
                  ("e" "Ediff Changes" org-todoist-ediff-snapshot)
