@@ -727,7 +727,7 @@ the Todoist project, section, and optionally parent task."
   (make-directory org-todoist-storage-dir t)
   (expand-file-name FILE org-todoist-storage-dir))
 
-                                        ;Git backup functions;;;;;;;;;;;;;;;;;;
+                                        ; Git backup functions;;;;;;;;;;;;;;;;;;
 (defun org-todoist--git-available-p ()
   "Check if git is available in PATH."
   (executable-find "git"))
@@ -771,6 +771,7 @@ Returns t if successful, nil otherwise."
              (org-todoist--git-initialized-p))
     (let ((default-directory org-todoist-storage-dir))
       ;; Stage all tracked files and the sync buffer
+      ;; Ignore return values for add operations - files may not exist yet
       (call-process "git" nil nil nil "add" "-u")
       (call-process "git" nil nil nil "add" org-todoist--sync-buffer-file org-todoist--sync-token-file)
       ;; Check if there are changes to commit
@@ -2794,7 +2795,7 @@ ARG is passed to `org-todoist--do-reset' if confirmed."
   "String ID is composed of only numbers."
   (string-match-p "^[0-9]+$" id))
 
-                                        ;Git history functions;;;;;;;;;;;;;;;;;
+                                        ; Git history functions;;;;;;;;;;;;;;;;;
 ;;;###autoload
 (defun org-todoist-git-log ()
   "Show git commit history for sync buffer in a buffer."
@@ -2818,12 +2819,13 @@ ARG is passed to `org-todoist--do-reset' if confirmed."
   "Show diff for COMMIT of sync buffer."
   (interactive
    (list (if (and org-todoist-use-git-backup (org-todoist--git-initialized-p))
-             (let ((default-directory org-todoist-storage-dir))
-               (completing-read "Select commit: "
-                                (split-string
-                                 (shell-command-to-string
-                                  (format "git log --oneline -20 %s" org-todoist--sync-buffer-file))
-                                 "\n" t)))
+             (let ((default-directory org-todoist-storage-dir)
+                   (output-buffer (generate-new-buffer " *git-log-output*")))
+               (with-current-buffer output-buffer
+                 (call-process "git" nil t nil "log" "--oneline" "-20" org-todoist--sync-buffer-file)
+                 (let ((commits (split-string (buffer-string) "\n" t)))
+                   (kill-buffer output-buffer)
+                   (completing-read "Select commit: " commits))))
            (user-error "Git backup is not enabled or initialized"))))
   (let* ((default-directory org-todoist-storage-dir)
          (commit-hash (car (split-string commit)))
@@ -2846,12 +2848,13 @@ This will replace the current sync buffer with the version from the selected com
 Use with caution - this affects sync state tracking."
   (interactive
    (list (if (and org-todoist-use-git-backup (org-todoist--git-initialized-p))
-             (let ((default-directory org-todoist-storage-dir))
-               (completing-read "Select commit to restore from: "
-                                (split-string
-                                 (shell-command-to-string
-                                  (format "git log --oneline -20 %s" org-todoist--sync-buffer-file))
-                                 "\n" t)))
+             (let ((default-directory org-todoist-storage-dir)
+                   (output-buffer (generate-new-buffer " *git-log-output*")))
+               (with-current-buffer output-buffer
+                 (call-process "git" nil t nil "log" "--oneline" "-20" org-todoist--sync-buffer-file)
+                 (let ((commits (split-string (buffer-string) "\n" t)))
+                   (kill-buffer output-buffer)
+                   (completing-read "Select commit to restore from: " commits))))
            (user-error "Git backup is not enabled or initialized"))))
   (when (yes-or-no-p (format "Really restore sync buffer from commit %s? This will affect sync state tracking." commit))
     (let* ((default-directory org-todoist-storage-dir)
@@ -3754,7 +3757,7 @@ This affects how Todoist links are opened."
                  :if (lambda () (and org-todoist-use-git-backup (org-todoist--git-initialized-p)))
                  ("l" "View Git Log" org-todoist-git-log)
                  ("d" "Show Commit Diff" org-todoist-git-show-diff)
-                 ("R" "Restore from Commit" org-todoist-git-restore)]
+                 ("r" "Restore from Commit" org-todoist-git-restore)]
    [:description (lambda () (propertize "Org View" 'face 'org-todoist-heading-face))
                  ("f" "Todoist File" org-todoist-goto)
                  ("j" "Project" org-todoist-jump-to-project)
@@ -3797,7 +3800,7 @@ This affects how Todoist links are opened."
    [:description (lambda () (propertize "Diagnostics" 'face 'org-todoist-heading-face))
                  ("D" "Show Diagnostics" org-todoist-diagnose)
                  ("C" "Test Push Commands" org-todoist--push-test)
-                 ("B" "Report Bug" org-todoist-report-bug)
+                 ("R" "Report Bug" org-todoist-report-bug)
                  ("M" "Migrate to V1 API" org-todoist-migrate-to-v1)]])
 
 (provide 'org-todoist)
