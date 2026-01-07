@@ -769,11 +769,16 @@ Returns t if successful, nil otherwise."
   (when (and org-todoist-use-git-backup
              (org-todoist--git-available-p)
              (org-todoist--git-initialized-p))
-    (let ((default-directory org-todoist-storage-dir))
-      ;; Stage all tracked files and the sync buffer
+    (let ((default-directory org-todoist-storage-dir)
+          (todoist-file (org-todoist-file))
+          (todoist-file-copy (expand-file-name "todoist.org" org-todoist-storage-dir)))
+      ;; Copy user's org-todoist file to storage directory for git tracking
+      (when (file-exists-p todoist-file)
+        (copy-file todoist-file todoist-file-copy t))
+      ;; Stage all tracked files including user's todoist file, sync buffer, and sync token
       ;; Ignore return values for add operations - files may not exist yet
       (call-process "git" nil nil nil "add" "-u")
-      (call-process "git" nil nil nil "add" org-todoist--sync-buffer-file org-todoist--sync-token-file)
+      (call-process "git" nil nil nil "add" "todoist.org" org-todoist--sync-buffer-file org-todoist--sync-token-file)
       ;; Check if there are changes to commit
       (when (not (zerop (call-process "git" nil nil nil "diff" "--cached" "--quiet")))
         (zerop (call-process "git" nil nil nil "commit" "-m" message))))))
@@ -2843,9 +2848,10 @@ ARG is passed to `org-todoist--do-reset' if confirmed."
 
 ;;;###autoload
 (defun org-todoist-git-restore (commit)
-  "Restore sync buffer from a previous git COMMIT.
-This will replace the current sync buffer with the version from the selected commit.
-Use with caution - this affects sync state tracking."
+  "Restore sync buffer and todoist file from a previous git COMMIT.
+This will replace the current sync buffer and your todoist.org file with versions
+from the selected commit. Use with caution - this affects sync state tracking and
+your local todoist file."
   (interactive
    (list (if (and org-todoist-use-git-backup (org-todoist--git-initialized-p))
              (let ((default-directory org-todoist-storage-dir)
@@ -2856,19 +2862,31 @@ Use with caution - this affects sync state tracking."
                    (kill-buffer output-buffer)
                    (completing-read "Select commit to restore from: " commits))))
            (user-error "Git backup is not enabled or initialized"))))
-  (when (yes-or-no-p (format "Really restore sync buffer from commit %s? This will affect sync state tracking." commit))
+  (when (yes-or-no-p (format "Really restore sync buffer AND todoist.org from commit %s? This will overwrite your current files." commit))
     (let* ((default-directory org-todoist-storage-dir)
            (commit-hash (car (split-string commit)))
-           (temp-file (make-temp-file "org-todoist-restore")))
-      ;; Extract file from commit
-      (with-temp-file temp-file
+           (temp-sync-file (make-temp-file "org-todoist-restore-sync"))
+           (temp-todoist-file (make-temp-file "org-todoist-restore-todoist"))
+           (todoist-file (org-todoist-file)))
+      ;; Extract sync buffer from commit
+      (with-temp-file temp-sync-file
         (call-process "git" nil t nil "show" (format "%s:%s" commit-hash org-todoist--sync-buffer-file)))
-      ;; Copy to sync buffer location
-      (copy-file temp-file (org-todoist--storage-file org-todoist--sync-buffer-file) t)
-      (delete-file temp-file)
+      ;; Extract todoist.org from commit (if it exists in the commit)
+      (when (zerop (call-process "git" nil nil nil "cat-file" "-e" (format "%s:todoist.org" commit-hash)))
+        (with-temp-file temp-todoist-file
+          (call-process "git" nil t nil "show" (format "%s:todoist.org" commit-hash))))
+      ;; Copy files to their locations
+      (copy-file temp-sync-file (org-todoist--storage-file org-todoist--sync-buffer-file) t)
+      (when (file-exists-p temp-todoist-file)
+        (copy-file temp-todoist-file todoist-file t)
+        (copy-file temp-todoist-file (expand-file-name "todoist.org" org-todoist-storage-dir) t))
+      ;; Cleanup temp files
+      (delete-file temp-sync-file)
+      (when (file-exists-p temp-todoist-file)
+        (delete-file temp-todoist-file))
       ;; Commit the restoration
       (org-todoist--git-commit (format "Restore: Restored from commit %s" commit-hash))
-      (message "Sync buffer restored from commit %s" commit-hash))))
+      (message "Sync buffer and todoist.org restored from commit %s" commit-hash))))
 
 ;; User functions
 

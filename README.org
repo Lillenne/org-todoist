@@ -120,6 +120,7 @@ Org-todoist automatically tracks sync buffer history using git (when enabled), p
 - View the complete history of all sync operations
 - Review changes made during any sync
 - Restore the sync buffer from any previous point in time
+- **Rollback local changes** if needed by restoring from a pre-sync commit
 
 #+begin_src emacs-lisp
 ;; Git backup is enabled by default. To disable:
@@ -137,7 +138,12 @@ Org-todoist automatically tracks sync buffer history using git (when enabled), p
 
 Git must be available in your PATH for this feature to work. The git repository is automatically initialized in ~org-todoist-storage-dir~ on the first sync when git backup is enabled.
 
-*Note:* Git backup tracks the sync buffer file (used for diffing changes) and sync token. It does not track debug files like last-request.json and last-response.json.
+*Note:* Git backup tracks:
+- Your org-todoist file (todoist.org) with all local changes
+- The sync buffer file (used for diffing changes)
+- The sync token
+
+It does not track debug files like last-request.json and last-response.json. A copy of your todoist.org file is stored in the storage directory for git tracking, ensuring you can always rollback to any previous state before or after a sync operation.
 
 Tasks can be created via org, org capture, or Todoist natural language processing.
 
