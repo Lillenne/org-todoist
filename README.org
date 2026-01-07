@@ -198,8 +198,6 @@ SCHEDULED: <2025-01-20 Mon 14:00>
 :END:
 #+end_example
 
-[[./readme-images/assign.png]]
-
 ** Navigation and project views
 #+begin_src emacs-lisp
 (org-todoist-goto) ;; Jump to the org-todoist file
