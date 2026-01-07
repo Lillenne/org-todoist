@@ -19,6 +19,7 @@ An Emacs package for bidirectional incremental sync of [[https://orgmode.org/][O
   - Notes/Comments + send notifications to other users
   - Repeating tasks[fn:2]
   - Assignee[fn:3]
+  - Reminders (absolute and relative time)
   - Retains LOGBOOK information (/e.g.,/ clocking)
 - CRUD[fn:1] new sections
 - CRUD[fn:1] new projects
@@ -40,6 +41,7 @@ An Emacs package for bidirectional incremental sync of [[https://orgmode.org/][O
 | Tags (+inherited)         | Labels                      |
 | org-archive-tag           | Archive projects + sections |
 | Responsible UID property  | Assignee                    |
+| Reminders property        | Reminders                   |
 
  [[Creating projects, subprojects, sections, tasks, and subtasks][See the usage section to learn the mapping rules for projects, sections, and tasks.]]
 
@@ -83,6 +85,11 @@ The following commands (and more!) are automatically available after installatio
 (org-todoist-unassign-task)
 (org-todoist-ignore-subtree)
 (org-todoist-add-subproject)
+
+;; Reminder management
+(org-todoist-add-absolute-reminder) ;; Add reminder at specific date/time
+(org-todoist-add-relative-reminder) ;; Add reminder X minutes before due
+(org-todoist-remove-reminder) ;; Remove reminder from task
 
 ;; Capture integration
 (org-todoist-project-notes)
@@ -162,6 +169,37 @@ Comments are done via ~org-add-note~ and currently ([2025-01-12 Sun]) do not sup
 
 [[./readme-images/assign.png]]
 
+** Managing reminders
+#+begin_src emacs-lisp
+(org-todoist-add-absolute-reminder) ;; Add a reminder at a specific date/time
+(org-todoist-add-relative-reminder) ;; Add a reminder X minutes before due date
+(org-todoist-remove-reminder) ;; Remove the reminder from a task
+#+end_src
+
+Reminders are stored in the task's property drawer under the ~reminders~ property using one of two formats:
+- Absolute: ~absolute|YYYY-MM-DDTHH:MM:SS~ - Reminder at a specific date and time
+- Relative: ~relative|MINUTES~ - Reminder X minutes before the task's due date (requires task to have a scheduled/due date)
+
+Example task with absolute reminder:
+#+begin_example
+**** TODO Submit report
+SCHEDULED: <2025-01-15 Wed 17:00>
+:PROPERTIES:
+:reminders: absolute|2025-01-15T16:00:00
+:END:
+#+end_example
+
+Example task with relative reminder (30 minutes before due):
+#+begin_example
+**** TODO Team meeting
+SCHEDULED: <2025-01-20 Mon 14:00>
+:PROPERTIES:
+:reminders: relative|30
+:END:
+#+end_example
+
+[[./readme-images/assign.png]]
+
 ** Navigation and project views
 #+begin_src emacs-lisp
 (org-todoist-goto) ;; Jump to the org-todoist file
@@ -237,7 +275,11 @@ Sample capture templates:
   - [X] Notify on comment
   - [X] Set a reminder using quick add
   - [X] Todoist default reminder (/e.g./, 10 min before every task)
-  - [ ] Almost everything else
+  - [X] Absolute time reminders
+  - [X] Relative time reminders (minutes before due)
+  - [ ] Location-based reminders
+  - [ ] Multiple reminders per task
+  - [ ] Reminder editing and deletion (currently adds new reminders)
 - [-] Labels
   - [X] Bidirectional mapping to org tags
   - [X] Inherited tags
