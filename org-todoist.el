@@ -1804,10 +1804,6 @@ EFF is the effort number in minutes."
     (org-todoist--update-comments comments AST)
     (org-todoist--set-last-sync-buffer AST)
     (org-todoist--update-file AST)
-    ;; Persist the new token only after the local snapshot and file update
-    ;; have succeeded, otherwise an interrupted sync can advance the token
-    ;; past the visible Org state and cause later incremental syncs to miss
-    ;; remote changes.
     (org-todoist--set-sync-token token)))
 
 (defun org-todoist--temp-id-mapping (TID_MAPPING AST)
