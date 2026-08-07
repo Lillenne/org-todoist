@@ -2921,7 +2921,7 @@ SEARCH: search query string or nil."
 (defun org-todoist-xdg-open-search-query (QUERY)
   "Open a search in Todoist with QUERY."
   (interactive "sQuery: ")
-  (browse-url-xdg-open (org-todoist--create-link nil "SEARCH" QUERY)))
+  (browse-url (org-todoist--create-link nil "SEARCH" QUERY)))
 
 ;;;###autoload
 (defun org-todoist-open-last-quick-task-in-app ()
@@ -2929,7 +2929,7 @@ SEARCH: search query string or nil."
   (interactive)
   (unless org-todoist--last-quick-task-id
     (user-error "No previous quick task!"))
-  (browse-url-xdg-open (org-todoist--create-link
+  (browse-url (org-todoist--create-link
                         org-todoist--last-quick-task-id
                         org-todoist--task-type)))
 
@@ -2940,7 +2940,7 @@ SEARCH: search query string or nil."
   (if-let ((_ (equal (org-todoist-file) (buffer-file-name)))
            (type (org-entry-get nil org-todoist--type))
            (id (org-entry-get nil org-todoist--id-property)))
-      (browse-url-xdg-open (org-todoist--create-link id type))
+      (browse-url (org-todoist--create-link id type))
     (org-todoist-xdg-open-task-search)))
 
 ;;;###autoload
@@ -2990,7 +2990,7 @@ Uses built-in completion without external dependencies."
          (id (cdr (assoc selection items))))
 
     (when id
-      (browse-url-xdg-open (org-todoist--create-link id org-todoist--task-type)))))
+      (browse-url (org-todoist--create-link id org-todoist--task-type)))))
 
 ;;;###autoload
 (defun org-todoist-report-bug ()
@@ -3532,27 +3532,27 @@ This affects how Todoist links are opened."
 (defun org-todoist-xdg-open-main-view ()
   "Open the main Todoist view."
   (interactive)
-  (browse-url-xdg-open (org-todoist--create-link nil nil)))
+  (browse-url (org-todoist--create-link nil nil)))
 
 (defun org-todoist-xdg-open-upcoming ()
   "Open the Todoist upcoming view."
   (interactive)
-  (browse-url-xdg-open (org-todoist--create-link nil "UPCOMING")))
+  (browse-url (org-todoist--create-link nil "UPCOMING")))
 
 (defun org-todoist-xdg-open-inbox ()
   "Open the Todoist inbox."
   (interactive)
-  (browse-url-xdg-open (org-todoist--create-link nil "INBOX")))
+  (browse-url (org-todoist--create-link nil "INBOX")))
 
 (defun org-todoist-xdg-open-today ()
   "Open the Todoist today view."
   (interactive)
-  (browse-url-xdg-open (org-todoist--create-link nil "TODAY")))
+  (browse-url (org-todoist--create-link nil "TODAY")))
 
 (defun org-todoist-xdg-open-projects ()
   "Open the Todoist projects view."
   (interactive)
-  (browse-url-xdg-open (org-todoist--create-link nil "PROJECTS")))
+  (browse-url (org-todoist--create-link nil "PROJECTS")))
 
 ;;;###autoload
 (transient-define-prefix org-todoist-dispatch ()
