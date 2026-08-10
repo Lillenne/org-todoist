@@ -358,8 +358,24 @@ this directory must be accessible on all PCs running the sync command."
   :type 'directory
   :group 'org-todoist)
 
+(defcustom org-todoist-use-git-backup t
+  "When non-nil, use git to manage sync buffer history.
+This creates automatic commits before and after each sync operation,
+providing a complete history of changes and protection against data loss.
+Git must be available in PATH for this feature to work."
+  :type 'boolean
+  :group 'org-todoist)
+
+(defcustom org-todoist-git-commit-message-format "Auto-commit: %s at %s"
+  "Format string for git commit messages.
+First %s is replaced with sync operation (e.g., 'pre-sync', 'post-sync'),
+second %s is replaced with timestamp."
+  :type 'string
+  :group 'org-todoist)
+
 (defvar url-http-end-of-headers) ;; silence byte compiler warning. Defined in url.el.
 (defvar org-todoist--cached-ast nil "Cached AST for the current org-todoist file.")
+(defvar org-todoist--git-initialized nil "Whether git repository has been initialized in storage directory.")
 
 (defmacro org-todoist--with-todoist-buffer! (&rest body)
   "Execute BODY with a buffer visiting variable `org-todoist-file' as current.
@@ -711,6 +727,71 @@ the Todoist project, section, and optionally parent task."
   (make-directory org-todoist-storage-dir t)
   (expand-file-name FILE org-todoist-storage-dir))
 
+                                        ; Git backup functions;;;;;;;;;;;;;;;;;;
+(defun org-todoist--git-available-p ()
+  "Check if git is available in PATH."
+  (executable-find "git"))
+
+(defun org-todoist--git-dir ()
+  "Get the git directory path within storage directory."
+  (expand-file-name ".git" org-todoist-storage-dir))
+
+(defun org-todoist--git-initialized-p ()
+  "Check if git repository is initialized in storage directory."
+  (file-directory-p (org-todoist--git-dir)))
+
+(defun org-todoist--init-git-repo ()
+  "Initialize git repository in storage directory if not already initialized.
+Returns t if successful or already initialized, nil if git is unavailable."
+  (when (and org-todoist-use-git-backup
+             (org-todoist--git-available-p)
+             (not (org-todoist--git-initialized-p)))
+    (let ((default-directory org-todoist-storage-dir))
+      (make-directory org-todoist-storage-dir t)
+      ;; Initialize git repo
+      (when (zerop (call-process "git" nil nil nil "init"))
+        ;; Configure git
+        (call-process "git" nil nil nil "config" "user.name" "org-todoist")
+        (call-process "git" nil nil nil "config" "user.email" "org-todoist@local")
+        ;; Create .gitignore for files we don't want to track
+        (with-temp-file (expand-file-name ".gitignore" org-todoist-storage-dir)
+          (insert "# Ignore temporary and debug files\n")
+          (insert "last-response.json\n")
+          (insert "last-request.json\n"))
+        (setq org-todoist--git-initialized t)
+        t)))
+  ;; Return t if already initialized
+  (org-todoist--git-initialized-p))
+
+(defun org-todoist--git-commit (message)
+  "Create a git commit in storage directory with MESSAGE.
+Returns t if successful, nil otherwise."
+  (when (and org-todoist-use-git-backup
+             (org-todoist--git-available-p)
+             (org-todoist--git-initialized-p))
+    (let ((default-directory org-todoist-storage-dir)
+          (todoist-file (org-todoist-file))
+          (todoist-file-copy (expand-file-name "todoist.org" org-todoist-storage-dir)))
+      ;; Copy user's org-todoist file to storage directory for git tracking
+      (when (file-exists-p todoist-file)
+        (copy-file todoist-file todoist-file-copy t))
+      ;; Stage all tracked files including user's todoist file, sync buffer, and sync token
+      ;; Ignore return values for add operations - files may not exist yet
+      (call-process "git" nil nil nil "add" "-u")
+      (call-process "git" nil nil nil "add" "todoist.org" org-todoist--sync-buffer-file org-todoist--sync-token-file)
+      ;; Check if there are changes to commit
+      (when (not (zerop (call-process "git" nil nil nil "diff" "--cached" "--quiet")))
+        (zerop (call-process "git" nil nil nil "commit" "-m" message))))))
+
+(defun org-todoist--git-commit-sync (stage)
+  "Create a git commit for sync operation at STAGE.
+STAGE should be either 'pre-sync' or 'post-sync'."
+  (when org-todoist-use-git-backup
+    (org-todoist--init-git-repo)
+    (let* ((timestamp (format-time-string "%Y-%m-%d %H:%M:%S"))
+           (message (format org-todoist-git-commit-message-format stage timestamp)))
+      (org-todoist--git-commit message))))
+
 (defun org-todoist--set-sync-token (TOKEN)
   "Store that last Todoist sync TOKEN."
   (let ((file (org-todoist--storage-file org-todoist--sync-token-file)))
@@ -950,6 +1031,8 @@ OPEN determines whether the Todoist buffer should be opened after sync."
   (unless (org-todoist--is-current-api)
     (user-error "Org todoist has updated API versions! Run 'org-todoist-migrate-to-v1' to continue using org-todoist"))
   (setq org-todoist--sync-err nil)
+  ;; Git pre-sync commit to capture state before sync
+  (org-todoist--git-commit-sync "pre-sync")
   (let* ((cur-marker (point-marker))
          (ast (org-todoist--file-ast))
          (commands (if (equal TOKEN "*")
@@ -1804,7 +1887,9 @@ EFF is the effort number in minutes."
     (org-todoist--update-comments comments AST)
     (org-todoist--set-sync-token token)
     (org-todoist--set-last-sync-buffer AST)
-    (org-todoist--update-file AST)))
+    (org-todoist--update-file AST)
+    ;; Git post-sync commit to capture state after successful sync
+    (org-todoist--git-commit-sync "post-sync")))
 
 (defun org-todoist--temp-id-mapping (TID_MAPPING AST)
   "Add ids to node with a temp_id in AST using TID_MAPPING."
@@ -2715,6 +2800,94 @@ ARG is passed to `org-todoist--do-reset' if confirmed."
   "String ID is composed of only numbers."
   (string-match-p "^[0-9]+$" id))
 
+                                        ; Git history functions;;;;;;;;;;;;;;;;;
+;;;###autoload
+(defun org-todoist-git-log ()
+  "Show git commit history for sync buffer in a buffer."
+  (interactive)
+  (if (not (and org-todoist-use-git-backup (org-todoist--git-initialized-p)))
+      (message "Git backup is not enabled or initialized. Set org-todoist-use-git-backup to t and perform a sync.")
+    (let ((default-directory org-todoist-storage-dir)
+          (log-buffer (get-buffer-create "*Org-Todoist Git Log*")))
+      (with-current-buffer log-buffer
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert "Git commit history for org-todoist sync buffer:\n")
+          (insert "=================================================\n\n")
+          (call-process "git" nil t nil "log" "--oneline" "--decorate" "-20" org-todoist--sync-buffer-file)
+          (goto-char (point-min))
+          (view-mode 1)))
+      (pop-to-buffer log-buffer))))
+
+;;;###autoload
+(defun org-todoist-git-show-diff (commit)
+  "Show diff for COMMIT of sync buffer."
+  (interactive
+   (list (if (and org-todoist-use-git-backup (org-todoist--git-initialized-p))
+             (let ((default-directory org-todoist-storage-dir)
+                   (output-buffer (generate-new-buffer " *git-log-output*")))
+               (with-current-buffer output-buffer
+                 (call-process "git" nil t nil "log" "--oneline" "-20" org-todoist--sync-buffer-file)
+                 (let ((commits (split-string (buffer-string) "\n" t)))
+                   (kill-buffer output-buffer)
+                   (completing-read "Select commit: " commits))))
+           (user-error "Git backup is not enabled or initialized"))))
+  (let* ((default-directory org-todoist-storage-dir)
+         (commit-hash (car (split-string commit)))
+         (diff-buffer (get-buffer-create "*Org-Todoist Git Diff*")))
+    (with-current-buffer diff-buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "Diff for commit %s:\n" commit))
+        (insert "===============================================\n\n")
+        (call-process "git" nil t nil "show" commit-hash)
+        (goto-char (point-min))
+        (diff-mode)
+        (view-mode 1)))
+    (pop-to-buffer diff-buffer)))
+
+;;;###autoload
+(defun org-todoist-git-restore (commit)
+  "Restore sync buffer and todoist file from a previous git COMMIT.
+This will replace the current sync buffer and your todoist.org file with versions
+from the selected commit. Use with caution - this affects sync state tracking and
+your local todoist file."
+  (interactive
+   (list (if (and org-todoist-use-git-backup (org-todoist--git-initialized-p))
+             (let ((default-directory org-todoist-storage-dir)
+                   (output-buffer (generate-new-buffer " *git-log-output*")))
+               (with-current-buffer output-buffer
+                 (call-process "git" nil t nil "log" "--oneline" "-20" org-todoist--sync-buffer-file)
+                 (let ((commits (split-string (buffer-string) "\n" t)))
+                   (kill-buffer output-buffer)
+                   (completing-read "Select commit to restore from: " commits))))
+           (user-error "Git backup is not enabled or initialized"))))
+  (when (yes-or-no-p (format "Really restore sync buffer AND todoist.org from commit %s? This will overwrite your current files." commit))
+    (let* ((default-directory org-todoist-storage-dir)
+           (commit-hash (car (split-string commit)))
+           (temp-sync-file (make-temp-file "org-todoist-restore-sync"))
+           (temp-todoist-file (make-temp-file "org-todoist-restore-todoist"))
+           (todoist-file (org-todoist-file)))
+      ;; Extract sync buffer from commit
+      (with-temp-file temp-sync-file
+        (call-process "git" nil t nil "show" (format "%s:%s" commit-hash org-todoist--sync-buffer-file)))
+      ;; Extract todoist.org from commit (if it exists in the commit)
+      (when (zerop (call-process "git" nil nil nil "cat-file" "-e" (format "%s:todoist.org" commit-hash)))
+        (with-temp-file temp-todoist-file
+          (call-process "git" nil t nil "show" (format "%s:todoist.org" commit-hash))))
+      ;; Copy files to their locations
+      (copy-file temp-sync-file (org-todoist--storage-file org-todoist--sync-buffer-file) t)
+      (when (file-exists-p temp-todoist-file)
+        (copy-file temp-todoist-file todoist-file t)
+        (copy-file temp-todoist-file (expand-file-name "todoist.org" org-todoist-storage-dir) t))
+      ;; Cleanup temp files
+      (delete-file temp-sync-file)
+      (when (file-exists-p temp-todoist-file)
+        (delete-file temp-todoist-file))
+      ;; Commit the restoration
+      (org-todoist--git-commit (format "Restore: Restored from commit %s" commit-hash))
+      (message "Sync buffer and todoist.org restored from commit %s" commit-hash))))
+
 ;; User functions
 
 ;;;###autoload
@@ -3506,6 +3679,29 @@ Includes warning if using deprecated API version."
       (setq org-todoist--background-timer nil))
     (org-todoist-background-sync)))
 
+(defun org-todoist--git-backup-display ()
+  "Return formatted string showing git backup status."
+  (format "Git Backup: %s"
+          (if (and org-todoist-use-git-backup
+                   (org-todoist--git-available-p))
+              (propertize (if (org-todoist--git-initialized-p)
+                              "Enabled (initialized)"
+                            "Enabled (will init on sync)")
+                          'face 'org-todoist-enabled-face)
+            (if org-todoist-use-git-backup
+                (propertize "Enabled (git not found)" 'face 'org-todoist-red-face)
+              (propertize "Disabled" 'face 'org-todoist-red-face)))))
+
+(transient-define-suffix org-todoist--toggle-git-backup-suffix ()
+  :transient t
+  :key "G"
+  :description #'org-todoist--git-backup-display
+  (interactive)
+  (setq org-todoist-use-git-backup (not org-todoist-use-git-backup))
+  (if org-todoist-use-git-backup
+      (message "Git backup enabled. Will initialize on next sync.")
+    (message "Git backup disabled.")))
+
 (defun org-todoist--url-scheme-display ()
   "Return formatted string showing current URL scheme setting.
 Shows if links will open in browser or app."
@@ -3563,7 +3759,8 @@ This affects how Todoist links are opened."
     (org-todoist--api-version-suffix)
     (org-todoist-toggle-remote-deletion-suffix)
     (org-todoist-toggle-background-sync-suffix)
-    (org-todoist--background-sync-interval-suffix)]]
+    (org-todoist--background-sync-interval-suffix)
+    (org-todoist--toggle-git-backup-suffix)]]
   [[:description (lambda () (propertize "Tasks" 'face 'org-todoist-heading-face))
                  ("q" "Quick Task" org-todoist-quick-task)
                  ("c" "Org Capture" org-todoist-capture-task)
@@ -3574,6 +3771,11 @@ This affects how Todoist links are opened."
                  ("s" "Sync" org-todoist-sync)
                  ("e" "Ediff Changes" org-todoist-ediff-snapshot)
                  ("r" "Force Reset" org-todoist-reset)]
+   [:description (lambda () (propertize "Git History" 'face 'org-todoist-heading-face))
+                 :if (lambda () (and org-todoist-use-git-backup (org-todoist--git-initialized-p)))
+                 ("l" "View Git Log" org-todoist-git-log)
+                 ("d" "Show Commit Diff" org-todoist-git-show-diff)
+                 ("r" "Restore from Commit" org-todoist-git-restore)]
    [:description (lambda () (propertize "Org View" 'face 'org-todoist-heading-face))
                  ("f" "Todoist File" org-todoist-goto)
                  ("j" "Project" org-todoist-jump-to-project)
