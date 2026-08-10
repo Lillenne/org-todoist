@@ -394,7 +394,7 @@ Automatically widens the buffer to ensure all content is accessible."
 
 (defconst org-todoist--api-version-prop "API")
 
-(defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators") "The list of resource types to sync.")
+(defconst org-todoist-resource-types '("projects" "notes" "labels" "items" "sections" "collaborators" "reminders") "The list of resource types to sync.")
 
 (defconst org-todoist-request-type "application/x-www-form-urlencoded; charset=utf-8" "The request type for Todoist sync requests.")
 
@@ -1540,6 +1540,14 @@ EFF is the effort number in minutes."
                                             ("project_id" . ,proj)
                                             ("responsible_uid" . ,rid))))
                                commands)
+                         ;; Add reminders for new tasks
+                         (when-let ((reminder-prop (org-todoist--get-prop hl "reminders")))
+                           (when-let ((reminder-data (org-todoist--decode-reminder-from-property reminder-prop)))
+                             (push `(("uuid" . ,(org-id-uuid))
+                                     ("type" . "reminder_add")
+                                     ("temp_id" . ,(org-id-uuid))
+                                     ("args" . ,(append `(("item_id" . ,id)) reminder-data))
+                                   commands))))
                          (when comments
                            ;; Add comments
                            (dolist (comment comments)
@@ -1622,6 +1630,18 @@ EFF is the effort number in minutes."
                                                  ("responsible_uid" . ,rid))))))
                            (push req commands)))
 
+
+                        ;; Check for reminder changes
+                        (let ((reminder-prop (org-todoist--get-prop hl "reminders"))
+                              (old-reminder-prop (org-todoist--get-prop oldtask "reminders")))
+                          (unless (equal reminder-prop old-reminder-prop)
+                            (when reminder-prop
+                              (when-let ((reminder-data (org-todoist--decode-reminder-from-property reminder-prop)))
+                                (push `(("uuid" . ,(org-id-uuid))
+                                        ("type" . "reminder_add")
+                                        ("temp_id" . ,(org-id-uuid))
+                                        ("args" . ,(append `(("item_id" . ,id)) reminder-data))
+                                      commands))))))
                        ;; todo-state changed
                        (when (not (equal todo-type old-todo-type))
                          (if (eq 'done todo-type)
@@ -1794,6 +1814,7 @@ EFF is the effort number in minutes."
         (collab (assoc-default 'collaborators RESPONSE))
         (sections (assoc-default 'sections RESPONSE))
         (comments (assoc-default 'notes RESPONSE))
+        (reminders (assoc-default 'reminders RESPONSE))
         (token (assoc-default 'sync_token RESPONSE))
         (tid_mapping (assoc-default 'temp_id_mapping RESPONSE)))
     (org-todoist--temp-id-mapping tid_mapping AST)
@@ -1802,6 +1823,7 @@ EFF is the effort number in minutes."
     (org-todoist--update-sections sections AST)
     (org-todoist--update-tasks tasks AST)
     (org-todoist--update-comments comments AST)
+    (org-todoist--update-reminders reminders AST)
     (org-todoist--set-sync-token token)
     (org-todoist--set-last-sync-buffer AST)
     (org-todoist--update-file AST)))
@@ -1828,6 +1850,17 @@ EFF is the effort number in minutes."
                (org-todoist--log-drawer-add-note task (assoc-default 'content comment) (assoc-default 'posted_at comment)))
              ;; TODO sort comments by time.
              )))
+
+(defun org-todoist--update-reminders (REMINDERS AST)
+  "Update reminders in AST using REMINDERS section of Todoist sync API response."
+  (when REMINDERS
+    (cl-loop for task-reminders across REMINDERS do
+             (let* ((item-id (assoc-default 'item_id task-reminders))
+                    (task (when item-id (org-todoist--get-by-id org-todoist--task-type item-id AST))))
+               (when task
+                 (let ((reminder-str (org-todoist--encode-reminder-to-property task-reminders)))
+                   (when reminder-str
+                     (org-todoist--add-prop task "reminders" reminder-str))))))))
 
 (defun org-todoist--insert-header ()
   "Insert a header appropriate for the Todoist org file."
@@ -2044,6 +2077,46 @@ from PARENT."
 (defun org-todoist--deadline-date (TASK)
   "Get the timestamp object representing the deadline date of TASK."
   (org-todoist--get-timestamp 'deadline TASK))
+
+(defun org-todoist--encode-reminder-to-property (REMINDER)
+  "Encode a Todoist REMINDER object to a string for storage in org properties.
+Format: type|data where:
+- For absolute: absolute|YYYY-MM-DDTHH:MM:SS
+- For relative: relative|minutes
+Returns nil if reminder is deleted."
+  (unless (eq t (assoc-default 'is_deleted REMINDER))
+    (let ((type (assoc-default 'type REMINDER)))
+      (cond
+       ((string= type "absolute")
+        (when-let ((due (assoc-default 'due REMINDER)))
+          (let ((date (assoc-default 'date due)))
+            (when date
+              (format "absolute|%s" date)))))
+       ((string= type "relative")
+        (when-let ((offset (assoc-default 'minute_offset REMINDER)))
+          (format "relative|%d" offset)))
+       (t nil)))))
+
+(defun org-todoist--decode-reminder-from-property (PROPERTY-STR)
+  "Decode a reminder property string to Todoist reminder format.
+PROPERTY-STR format: type|data where:
+- For absolute: absolute|YYYY-MM-DDTHH:MM:SS  
+- For relative: relative|minutes
+Returns an alist suitable for Todoist API."
+  (when (and PROPERTY-STR (not (string-empty-p PROPERTY-STR)))
+    (let* ((parts (split-string PROPERTY-STR "|"))
+           (type (car parts))
+           (data (cadr parts)))
+      (cond
+       ((string= type "absolute")
+        `(("type" . "absolute")
+          ("due" . (("date" . ,data)
+                   ("lang" . ,org-todoist-lang)
+                   ("timezone" . nil)))))
+       ((string= type "relative")
+        `(("type" . "relative")
+          ("minute_offset" . ,(string-to-number data))))
+       (t nil)))))
 
 (defun org-todoist--get-ts-from-date (date &optional inactive)
   "Get a timestamp object representing DATE in the `current-time-zone'.
@@ -3211,7 +3284,52 @@ When region is active, assign all tasks in the region to the selected user."
                   (user-error "Can only assign users to task headlines")
                 (org-set-property "responsible_uid" uid)))))))))
 
+
 ;;;###autoload
+(defun org-todoist-add-absolute-reminder ()
+  "Add an absolute time reminder to the task at point.
+Prompts for date and time using org date picker."
+  (interactive)
+  (unless (string= (buffer-file-name) (org-todoist-file))
+    (user-error "This command only works in the org-todoist buffer"))
+  (let ((type (org-entry-get nil org-todoist--type)))
+    (unless (or (null type) (string= type org-todoist--task-type))
+      (user-error "Can only add reminders to task headlines")))
+  
+  (let* ((date-time (org-read-date t nil nil "Reminder date/time: "))
+         (ts (org-timestamp-from-time (org-read-date nil t date-time nil) t))
+         (reminder-str (concat "absolute|" (org-todoist--date-to-todoist ts))))
+    (org-set-property "reminders" reminder-str)
+    (message "Added absolute reminder for %s" date-time)))
+
+;;;###autoload
+(defun org-todoist-add-relative-reminder ()
+  "Add a relative time reminder to the task at point.
+Prompts for minutes before due date."
+  (interactive)
+  (unless (string= (buffer-file-name) (org-todoist-file))
+    (user-error "This command only works in the org-todoist buffer"))
+  (let ((type (org-entry-get nil org-todoist--type)))
+    (unless (or (null type) (string= type org-todoist--task-type))
+      (user-error "Can only add reminders to task headlines")))
+  
+  (let* ((minutes (read-number "Minutes before due date: " 30))
+         (reminder-str (format "relative|%d" minutes)))
+    (org-set-property "reminders" reminder-str)
+    (message "Added reminder for %d minutes before due date" minutes)))
+
+;;;###autoload
+(defun org-todoist-remove-reminder ()
+  "Remove the reminder from the task at point."
+  (interactive)
+  (unless (string= (buffer-file-name) (org-todoist-file))
+    (user-error "This command only works in the org-todoist buffer"))
+  (if (org-entry-get nil "reminders")
+      (progn
+        (org-delete-property "reminders")
+        (message "Reminder removed"))
+    (message "No reminder to remove")))
+
 (defun org-todoist-migrate-to-v1 ()
   "Migrate data from Todoist API v9 to v1.
 This function updates all Todoist IDs in function `org-todoist-file' to the new
@@ -3569,7 +3687,10 @@ This affects how Todoist links are opened."
                  ("c" "Org Capture" org-todoist-capture-task)
                  ("g" "Assign" org-todoist-assign-task)
                  ("n" "Unassign" org-todoist-unassign-task)
-                 ("@" "Tag User" org-todoist-tag-user)]
+                 ("@" "Tag User" org-todoist-tag-user)
+                  ("R" "Add Absolute Reminder" org-todoist-add-absolute-reminder)
+                  ("r" "Add Relative Reminder" org-todoist-add-relative-reminder)
+                  ("X" "Remove Reminder" org-todoist-remove-reminder)]
    [:description (lambda () (propertize "Sync Operations" 'face 'org-todoist-heading-face))
                  ("s" "Sync" org-todoist-sync)
                  ("e" "Ediff Changes" org-todoist-ediff-snapshot)
